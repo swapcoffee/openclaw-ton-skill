@@ -126,18 +126,25 @@ def get_domain_info(domain: str) -> dict:
 
 def is_ton_domain(address_or_domain: str) -> bool:
     """Проверяет, является ли строка .ton доменом."""
-    clean = address_or_domain.lower().strip()
+    clean = address_or_domain.strip()
+
+    # Если это валидный TON адрес — точно не домен
+    if is_valid_address(clean):
+        return False
+
+    # Если содержит ":" — это raw адрес, не домен
+    if ":" in clean:
+        return False
+
+    clean_lower = clean.lower()
 
     # Явно .ton в конце
-    if clean.endswith(".ton"):
+    if clean_lower.endswith(".ton"):
         return True
 
-    # Не похоже на адрес (нет base64 символов или raw формата)
-    if ":" not in clean and not is_valid_address(clean):
-        # Может быть доменом без .ton
-        # Проверяем что нет невалидных символов
-        if all(c.isalnum() or c in "-_" for c in clean) and len(clean) > 0:
-            return True
+    # Может быть доменом без .ton (короткое имя)
+    if all(c.isalnum() or c in "-_" for c in clean_lower) and 0 < len(clean_lower) <= 30:
+        return True
 
     return False
 

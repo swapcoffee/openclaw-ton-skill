@@ -525,10 +525,15 @@ def transfer_jetton(
     if not jettons["success"]:
         return {"success": False, "error": "Failed to get jetton balances"}
 
+    # Нормализация символа (USD₮ → USDT и т.п.)
+    def normalize_symbol(s):
+        return s.upper().replace("₮", "T").replace("₿", "B").strip()
+
     target_jetton = None
+    jetton_normalized = normalize_symbol(jetton)
     for j in jettons.get("jettons", []):
         # Ищем по символу или адресу
-        if j.get("symbol", "").upper() == jetton.upper():
+        if normalize_symbol(j.get("symbol", "")) == jetton_normalized:
             target_jetton = j
             break
         if j.get("jetton_address") == jetton:
