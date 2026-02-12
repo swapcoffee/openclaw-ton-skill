@@ -3,8 +3,6 @@ Pytest configuration and shared fixtures for openclaw-ton-skill tests.
 """
 
 import json
-import os
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -51,6 +49,7 @@ ETH_ADDRESS = "0x742d35Cc6634C0532925a3b844Bc9e7595f8fE2d"
 # Fixtures - Temporary Directories
 # =============================================================================
 
+
 @pytest.fixture
 def temp_wallet_dir():
     """Create a temporary directory for wallet storage."""
@@ -70,6 +69,7 @@ def temp_skill_dir(tmp_path):
 # Fixtures - Mock TonAPI
 # =============================================================================
 
+
 @pytest.fixture
 def mock_tonapi():
     """Mock TonAPI responses."""
@@ -81,7 +81,7 @@ def mock_tonapi():
         mock_response.json.return_value = {
             "balance": 1000000000,  # 1 TON in nanoTON
             "status": "active",
-            "is_wallet": True
+            "is_wallet": True,
         }
         mock_request.return_value = mock_response
         yield mock_request
@@ -104,7 +104,7 @@ def mock_tonapi_error():
 def mock_tonapi_timeout():
     """Mock TonAPI timeout."""
     import requests
-    
+
     with patch("requests.Session.request") as mock_request:
         mock_request.side_effect = requests.exceptions.Timeout("Connection timed out")
         yield mock_request
@@ -113,6 +113,7 @@ def mock_tonapi_timeout():
 # =============================================================================
 # Fixtures - Sample Data
 # =============================================================================
+
 
 @pytest.fixture
 def sample_wallet_data():
@@ -138,7 +139,7 @@ def sample_jetton_balance():
                     "symbol": "USDT",
                     "decimals": 6,
                     "verification": "whitelist",
-                    "price": {"prices": {"USD": "1.0"}}
+                    "price": {"prices": {"USD": "1.0"}},
                 },
             },
             {
@@ -149,7 +150,7 @@ def sample_jetton_balance():
                     "symbol": "NOT",
                     "decimals": 9,
                     "verification": "whitelist",
-                    "price": {"prices": {"USD": "0.01"}}
+                    "price": {"prices": {"USD": "0.01"}},
                 },
             },
         ]
@@ -190,7 +191,7 @@ def sample_account_info():
         "last_activity": 1704067200,
         "interfaces": ["wallet_v4r2"],
         "name": None,
-        "is_wallet": True
+        "is_wallet": True,
     }
 
 
@@ -198,16 +199,17 @@ def sample_account_info():
 # Fixtures - Mock Config
 # =============================================================================
 
+
 @pytest.fixture
 def mock_config(tmp_path, monkeypatch):
     """Mock configuration for tests."""
     temp_skill_dir = tmp_path / "ton-skill"
     temp_config_file = temp_skill_dir / "config.json"
     temp_wallets_file = temp_skill_dir / "wallets.enc"
-    
+
     # Create directory
     temp_skill_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create default config
     default_config = {
         "tonapi_key": "test_api_key",
@@ -215,24 +217,22 @@ def mock_config(tmp_path, monkeypatch):
         "dyor_key": "",
         "default_wallet": "",
         "network": "mainnet",
-        "limits": {
-            "max_transfer_ton": 100,
-            "require_confirmation": True
-        }
+        "limits": {"max_transfer_ton": 100, "require_confirmation": True},
     }
     temp_config_file.write_text(json.dumps(default_config))
-    
+
     # Patch module-level variables
     import utils
+
     monkeypatch.setattr(utils, "SKILL_DIR", temp_skill_dir)
     monkeypatch.setattr(utils, "CONFIG_FILE", temp_config_file)
     monkeypatch.setattr(utils, "WALLETS_FILE", temp_wallets_file)
-    
+
     return {
         "skill_dir": temp_skill_dir,
         "config_file": temp_config_file,
         "wallets_file": temp_wallets_file,
-        "config": default_config
+        "config": default_config,
     }
 
 
@@ -240,16 +240,19 @@ def mock_config(tmp_path, monkeypatch):
 # Security Test Helpers
 # =============================================================================
 
+
 @pytest.fixture
 def capture_logs(caplog):
     """Fixture to capture and check logs for sensitive data."""
     import logging
-    
+
     caplog.set_level(logging.DEBUG)
     return caplog
 
 
-def assert_no_secrets_in_string(text: str, mnemonic: str = None, private_key: str = None):
+def assert_no_secrets_in_string(
+    text: str, mnemonic: str = None, private_key: str = None
+):
     """Assert that sensitive data is not present in a string."""
     if mnemonic:
         # Check full mnemonic
@@ -259,7 +262,7 @@ def assert_no_secrets_in_string(text: str, mnemonic: str = None, private_key: st
         for i in range(len(words) - 2):
             phrase = " ".join(words[i : i + 3])
             assert phrase not in text.lower(), f"Mnemonic words found: {phrase}"
-    
+
     if private_key:
         assert private_key not in text, "Private key found in text!"
 
@@ -268,11 +271,14 @@ def assert_no_secrets_in_string(text: str, mnemonic: str = None, private_key: st
 # Test Categories (markers)
 # =============================================================================
 
+
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "security: Security-related tests (critical)")
     config.addinivalue_line("markers", "slow: Slow tests (skip with -m 'not slow')")
-    config.addinivalue_line("markers", "integration: Integration tests requiring network")
+    config.addinivalue_line(
+        "markers", "integration: Integration tests requiring network"
+    )
     config.addinivalue_line("markers", "wallet: Wallet module tests")
     config.addinivalue_line("markers", "transfer: Transfer module tests")
     config.addinivalue_line("markers", "swap: Swap module tests")
@@ -283,6 +289,7 @@ def pytest_configure(config):
 # Pytest Hooks
 # =============================================================================
 
+
 def pytest_collection_modifyitems(config, items):
     """Modify test collection to add markers based on test location."""
     for item in items:
@@ -291,7 +298,7 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.wallet)
         elif "test_utils" in str(item.fspath):
             item.add_marker(pytest.mark.utils)
-        
+
         # Add security marker to security-named tests
         if "security" in item.name.lower() or "sec" in item.name.lower():
             item.add_marker(pytest.mark.security)
