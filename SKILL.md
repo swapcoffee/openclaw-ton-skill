@@ -34,7 +34,16 @@ If wallets exist and monitor is NOT running:
 3. Alert the user on any incoming/outgoing transfer, swap, or NFT event
 4. Clear the log after processing
 
-**After creating or importing a new wallet**, always:
+**After creating or importing a new wallet**, ask the user:
+1. "Хочешь включить эмуляцию транзакций перед отправкой?"
+   - **Да, на всё** → set `emulation_mode: all` in config
+   - **Только на крупные** → ask threshold, set `emulation_mode: threshold`, `emulation_threshold_ton: <amount>`
+   - **Только на определённые** → set `emulation_mode: selective` (emulate only swaps/nft/yield, skip simple transfers)
+   - **Нет** → set `emulation_mode: none`
+
+Configure: `python utils.py config set emulation_mode <all|threshold|selective|none>`
+
+Then always:
 1. Restart the monitor to pick up the new wallet: `python monitor.py stop && python monitor.py start -p <password> --daemon`
 2. If monitor cron doesn't exist yet, create it
 
