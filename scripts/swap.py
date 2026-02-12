@@ -319,17 +319,32 @@ def build_swap_transactions(
     input_decimals = input_info.get("decimals", 9)
     input_amount_raw = int(input_amount * (10**input_decimals))
 
-    # Запрос на построение транзакций
+    # Сначала получаем маршрут через v1
+    route_result = swap_coffee_request(
+        "/route",
+        method="POST",
+        json_data={
+            "input_token": {"blockchain": "ton", "address": input_addr},
+            "output_token": {"blockchain": "ton", "address": output_addr},
+            "input_amount": input_amount,
+            "max_length": 3,
+        },
+        version="v1",
+    )
+
+    if not route_result["success"]:
+        return {"success": False, "error": route_result.get("error", "Failed to get route")}
+
+    # Запрос на построение транзакций через v2
     result = swap_coffee_request(
         "/route/transactions",
         method="POST",
         json_data={
-            "input_token": input_addr,
-            "output_token": output_addr,
-            "input_amount": str(input_amount_raw),
             "sender_address": sender_address,
-            "slippage": str(slippage / 100),
+            "slippage": slippage / 100,
+            "paths": route_result["data"].get("paths", []),
         },
+        version="v2",
     )
 
     if not result["success"]:
@@ -386,9 +401,27 @@ def create_wallet_instance(wallet_data: dict):
 
 def get_seqno(address: str) -> int:
     """Получает seqno кошелька."""
+    # Пробуем /v2/wallet/{address}/seqno
     result = tonapi_request(f"/wallet/{address}/seqno")
     if result["success"]:
         return result["data"].get("seqno", 0)
+    
+    # Fallback: через get method
+    result = tonapi_request(f"/blockchain/accounts/{address}/methods/seqno")
+    if result["success"]:
+        decoded = result["data"].get("decoded", {})
+        # Может вернуть как {"seqno": N} или просто число
+        if isinstance(decoded, dict):
+            return decoded.get("seqno", 0)
+        elif isinstance(decoded, int):
+            return decoded
+        # Также смотрим в stack
+        stack = result["data"].get("stack", [])
+        if stack and len(stack) > 0:
+            first = stack[0]
+            if isinstance(first, dict) and first.get("type") == "num":
+                return int(first.get("num", "0"), 16)
+    
     return 0
 
 
@@ -490,6 +523,14 @@ def execute_swap(
         return {"success": False, "error": "No transactions returned by API"}
 
     # 4. Подписываем транзакции
+    # swap.coffee API возвращает транзакции с полями:
+    # - address: куда отправить (адрес контракта swap.coffee)
+    # - value: сколько TON приложить (в nano, строка)
+    # - cell: готовый BOC payload (base64)
+    # - send_mode: режим отправки (обычно 3)
+    #
+    # Нужно создать transfer message от нашего кошелька на address с value TON и cell как payload body
+    
     wallet = create_wallet_instance(wallet_data)
     seqno = get_seqno(sender_address)
 
@@ -497,27 +538,37 @@ def execute_swap(
     total_fee = 0
 
     for i, tx in enumerate(transactions):
-        # Каждая транзакция содержит to_address, amount, payload
-        to_addr = tx.get("to", tx.get("address"))
-        amount = int(tx.get("value", tx.get("amount", 0)))
-        payload_b64 = tx.get("payload", tx.get("body"))
-
-        # Создаём Cell из payload
+        # Парсим поля из swap.coffee API response
+        to_addr = tx.get("address")  # Куда отправить
+        amount_str = tx.get("value", "0")  # В nano, как строка
+        amount = int(amount_str)
+        cell_b64 = tx.get("cell")  # Готовый BOC payload (base64)
+        send_mode = tx.get("send_mode", 3)
+        
+        if not to_addr:
+            return {"success": False, "error": f"Transaction {i} has no address"}
+        
+        # Декодируем cell из base64 в Cell объект
         payload = None
-        if payload_b64:
+        if cell_b64:
             try:
-                payload_bytes = base64.b64decode(payload_b64)
-                payload = Cell.one_from_boc(payload_bytes)
-            except:
-                pass
+                cell_bytes = base64.b64decode(cell_b64)
+                payload = Cell.one_from_boc(cell_bytes)
+            except Exception as e:
+                return {"success": False, "error": f"Failed to decode cell for tx {i}: {e}"}
 
-        # Создаём transfer
-        query = wallet.create_transfer_message(
-            to_addr=to_addr,
-            amount=amount,
-            payload=payload,
-            seqno=seqno + i,  # Увеличиваем seqno для каждой транзакции
-        )
+        # Создаём transfer message
+        # to_addr может быть в raw format "0:abc...", tonsdk работает с этим
+        try:
+            query = wallet.create_transfer_message(
+                to_addr=to_addr,
+                amount=amount,
+                payload=payload,
+                seqno=seqno + i,  # Увеличиваем seqno для каждой транзакции
+                send_mode=send_mode,
+            )
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create transfer for tx {i}: {e}"}
 
         boc = query["message"].to_boc(False)
         boc_b64 = base64.b64encode(boc).decode("ascii")
@@ -532,6 +583,7 @@ def execute_swap(
                 "amount_nano": amount,
                 "amount_ton": amount / 1e9,
                 "boc": boc_b64,
+                "send_mode": send_mode,
                 "emulation": emulation,
             }
         )
