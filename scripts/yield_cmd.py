@@ -358,7 +358,7 @@ def get_pool_details(pool_id: str) -> dict:
         return {"success": True, "source": "swap.coffee", "pool": normalized}
 
     # Fallback: TonAPI pool info
-    result = tonapi_request(f"/accounts/{pool_id}")
+    result = tonapi_request(f"/accounts/{_make_url_safe(pool_id)}")
 
     if result["success"]:
         data = result["data"]
@@ -493,7 +493,8 @@ def create_wallet_instance(wallet_data: dict):
 
 def get_seqno(address: str) -> int:
     """Получает seqno кошелька."""
-    result = tonapi_request(f"/wallet/{address}/seqno")
+    addr_safe = _make_url_safe(address)
+    result = tonapi_request(f"/wallet/{addr_safe}/seqno")
     if result["success"]:
         return result["data"].get("seqno", 0)
     return 0
@@ -607,22 +608,28 @@ def deposit_liquidity(
     total_fee = 0
 
     for i, tx in enumerate(transactions):
-        to_addr = tx.get("to") or tx.get("address")
-        amount_nano = int(tx.get("value", tx.get("amount", 0)))
-        payload_b64 = tx.get("payload") or tx.get("body")
+        # swap.coffee API возвращает: address, value, cell
+        to_addr = tx.get("address") or tx.get("to")
+        amount_str = tx.get("value", tx.get("amount", "0"))
+        amount_nano = int(amount_str)
+        cell_b64 = tx.get("cell") or tx.get("payload") or tx.get("body")
+        send_mode = tx.get("send_mode", 3)
 
-        # Создаём payload Cell
+        if not to_addr:
+            return {"success": False, "error": f"Transaction {i} has no address"}
+
+        # Декодируем cell из base64 в Cell объект
         payload = None
-        if payload_b64:
+        if cell_b64:
             try:
-                payload_bytes = base64.b64decode(payload_b64)
-                payload = Cell.one_from_boc(payload_bytes)
-            except:
-                pass
+                cell_bytes = base64.b64decode(cell_b64)
+                payload = Cell.one_from_boc(cell_bytes)
+            except Exception as e:
+                return {"success": False, "error": f"Failed to decode cell for tx {i}: {e}"}
 
         # Transfer message
         query = wallet.create_transfer_message(
-            to_addr=to_addr, amount=amount_nano, payload=payload, seqno=seqno + i
+            to_addr=to_addr, amount=amount_nano, payload=payload, seqno=seqno + i, send_mode=send_mode
         )
 
         boc = query["message"].to_boc(False)
@@ -865,7 +872,7 @@ def get_positions(wallet: str, password: Optional[str] = None) -> dict:
         }
 
     # Fallback: ищем LP токены через TonAPI
-    result = tonapi_request(f"/accounts/{wallet_address}/jettons")
+    result = tonapi_request(f"/accounts/{_make_url_safe(wallet_address)}/jettons")
 
     if not result["success"]:
         return {"success": False, "error": "Failed to fetch positions"}
