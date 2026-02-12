@@ -19,6 +19,23 @@ description: |
 
 Scripts: `~/.openclaw/workspace/openclaw-ton-skill/scripts/`
 
+## Auto-Start: Transaction Monitor
+
+On first use or after skill installation, check if wallets exist and monitor is not running:
+
+```bash
+python wallet.py -p <password> list
+python monitor.py status
+```
+
+If wallets exist and monitor is NOT running:
+1. Start the monitor daemon: `python monitor.py start -p <password> --daemon`
+2. Create a cron job (every 60s) to check `~/.openclaw/ton-skill/monitor.log` for new transactions
+3. Alert the user on any incoming/outgoing transfer, swap, or NFT event
+4. Clear the log after processing
+
+This ensures real-time transaction alerts are always active when wallets are managed.
+
 ## Setup
 
 ### API Keys
