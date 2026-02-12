@@ -52,6 +52,17 @@ NFT_TRANSFER_OPCODE = 0x5FCC3D14
 # Marketapp API
 MARKETAPP_BASE = "https://api.marketapp.ws/v1"
 
+# Known collection aliases
+COLLECTION_ALIASES = {
+    # Anonymous Telegram Numbers
+    "anonymous-numbers": "EQAOQdwdw8kGftJCSFgOErM1mBjYPe4DBPq8-AhF6vr9si5N",
+    "anon": "EQAOQdwdw8kGftJCSFgOErM1mBjYPe4DBPq8-AhF6vr9si5N",
+    "numbers": "EQAOQdwdw8kGftJCSFgOErM1mBjYPe4DBPq8-AhF6vr9si5N",
+    # Telegram Usernames
+    "usernames": "EQCA14o1-VWhS2efqoh_9M1b_A9DtKTuoqfmkn83AbJzwnPi",
+    "username": "EQCA14o1-VWhS2efqoh_9M1b_A9DtKTuoqfmkn83AbJzwnPi",
+}
+
 
 # =============================================================================
 # Marketapp API Helper
@@ -533,6 +544,166 @@ def get_collection_info(
             result["stats"] = {"items_count": ton_data.get("next_item_index", 0)}
 
     return result
+
+
+# =============================================================================
+# Collection Floor Price
+# =============================================================================
+
+
+def resolve_collection_alias(collection: str) -> str:
+    """
+    Resolve collection alias to address.
+    
+    Args:
+        collection: Alias (e.g. 'anon', 'usernames') or address
+    
+    Returns:
+        Collection address
+    """
+    # Check if it's a known alias
+    alias_lower = collection.lower().strip()
+    if alias_lower in COLLECTION_ALIASES:
+        return COLLECTION_ALIASES[alias_lower]
+    
+    # Return as-is (assume it's an address)
+    return collection
+
+
+def get_collection_floor(collection: str) -> dict:
+    """
+    Get floor price for a collection.
+    
+    Args:
+        collection: Collection alias or address
+    
+    Returns:
+        dict with floor price info
+    """
+    # Resolve alias
+    collection_address = resolve_collection_alias(collection)
+    
+    try:
+        api_address = normalize_address(collection_address, "friendly")
+    except:
+        api_address = collection_address
+    
+    # Method 1: Try to get from /collections/ list (has floor in extra_data)
+    collections_result = marketapp_request("/collections/")
+    
+    collection_data = None
+    if collections_result["success"]:
+        for coll in collections_result["data"]:
+            if coll.get("address") == api_address:
+                collection_data = coll
+                break
+    
+    if collection_data:
+        extra = collection_data.get("extra_data", {})
+        floor_nano = int(extra.get("floor", 0))
+        
+        return {
+            "success": True,
+            "collection": {
+                "address": api_address,
+                "name": collection_data.get("name"),
+                "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+            },
+            "floor_price_nano": floor_nano,
+            "floor_price_ton": floor_nano / 1e9 if floor_nano else None,
+            "stats": {
+                "items_count": extra.get("items"),
+                "on_sale": extra.get("on_sale_all"),
+                "owners": extra.get("owners"),
+                "volume_7d_ton": int(extra.get("volume7d", 0)) / 1e9 if extra.get("volume7d") else None,
+                "volume_30d_ton": int(extra.get("volume30d", 0)) / 1e9 if extra.get("volume30d") else None,
+            },
+            "source": "marketapp_collections",
+        }
+    
+    # Method 2: Fallback - get cheapest NFT on sale from the collection
+    nfts_result = marketapp_request(
+        f"/nfts/collections/{api_address}/",
+        params={"filter_by": "onsale", "limit": 100},
+    )
+    
+    if nfts_result["success"]:
+        items = nfts_result["data"].get("items", [])
+        
+        if not items:
+            # Try TonAPI for collection name at least
+            tonapi_result = tonapi_request(f"/nfts/collections/{api_address}")
+            collection_name = None
+            if tonapi_result["success"]:
+                metadata = tonapi_result["data"].get("metadata", {})
+                collection_name = metadata.get("name") or tonapi_result["data"].get("name")
+            
+            return {
+                "success": True,
+                "collection": {
+                    "address": api_address,
+                    "name": collection_name,
+                    "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+                },
+                "floor_price_nano": None,
+                "floor_price_ton": None,
+                "message": "No NFTs on sale in this collection",
+                "source": "marketapp_nfts",
+            }
+        
+        # Find minimum price
+        min_price = float("inf")
+        min_nft = None
+        for item in items:
+            price = int(item.get("min_bid", 0))
+            if price > 0 and price < min_price:
+                min_price = price
+                min_nft = item
+        
+        if min_nft:
+            return {
+                "success": True,
+                "collection": {
+                    "address": api_address,
+                    "name": min_nft.get("collection_name"),
+                    "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+                },
+                "floor_price_nano": min_price,
+                "floor_price_ton": min_price / 1e9,
+                "floor_nft": {
+                    "address": min_nft.get("address"),
+                    "name": min_nft.get("name"),
+                    "item_num": min_nft.get("item_num"),
+                },
+                "on_sale_count": len(items),
+                "source": "marketapp_nfts",
+            }
+    
+    # Method 3: TonAPI fallback for basic info
+    tonapi_result = tonapi_request(f"/nfts/collections/{api_address}")
+    
+    if tonapi_result["success"]:
+        ton_data = tonapi_result["data"]
+        metadata = ton_data.get("metadata", {})
+        
+        return {
+            "success": True,
+            "collection": {
+                "address": api_address,
+                "name": metadata.get("name") or ton_data.get("name"),
+                "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+            },
+            "floor_price_nano": None,
+            "floor_price_ton": None,
+            "message": "Floor price not available (Marketapp API key may be missing)",
+            "items_count": ton_data.get("next_item_index", 0),
+            "source": "tonapi",
+        }
+    
+    return {
+        "success": False,
+        "error": f"Collection not found: {collection}",
+    }
 
 
 # =============================================================================
@@ -1474,6 +1645,13 @@ Examples:
     search_p.add_argument("--query", "-q", required=True, help="Search query")
     search_p.add_argument("--limit", "-l", type=int, default=10, help="Max results")
 
+    # --- floor ---
+    floor_p = subparsers.add_parser("floor", help="Get collection floor price")
+    floor_p.add_argument(
+        "--collection", "-c", required=True,
+        help="Collection address or alias (anon, usernames, etc.)"
+    )
+
     # --- gifts ---
     gifts_p = subparsers.add_parser("gifts", help="List gifts on sale")
     gifts_p.add_argument("--model", "-m", help="Filter by model")
@@ -1572,6 +1750,9 @@ Examples:
 
         elif args.command == "search":
             result = search_collections(args.query, args.limit)
+
+        elif args.command == "floor":
+            result = get_collection_floor(args.collection)
 
         elif args.command == "gifts":
             result = get_gifts_on_sale(

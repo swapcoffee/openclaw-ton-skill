@@ -25,6 +25,11 @@ from utils import tonapi_request, normalize_address, raw_to_friendly
 from dns import resolve_address
 from wallet import WalletStorage, get_jetton_balances
 
+
+def _make_url_safe(address: str) -> str:
+    """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
+    return address.replace("+", "-").replace("/", "_")
+
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum
@@ -196,7 +201,8 @@ def build_jetton_transfer(
 
 def get_seqno(address: str) -> int:
     """Получает текущий seqno кошелька."""
-    result = tonapi_request(f"/wallet/{address}/seqno")
+    addr = _make_url_safe(address)
+    result = tonapi_request(f"/wallet/{addr}/seqno")
 
     if result["success"]:
         return result["data"].get("seqno", 0)
@@ -556,7 +562,9 @@ def transfer_jetton(
     decimals = target_jetton.get("decimals", 9)
 
     # TonAPI endpoint для получения jetton wallet
-    jw_result = tonapi_request(f"/accounts/{sender_address}/jettons/{jetton_master}")
+    sender_safe = _make_url_safe(sender_address)
+    master_safe = _make_url_safe(jetton_master)
+    jw_result = tonapi_request(f"/accounts/{sender_safe}/jettons/{master_safe}")
     if not jw_result["success"]:
         return {"success": False, "error": "Failed to get jetton wallet address"}
 

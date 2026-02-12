@@ -245,6 +245,18 @@ def mnemonic_to_wallet(mnemonic: List[str], version: str = "v4r2") -> dict:
 # =============================================================================
 
 
+def _make_url_safe(address: str) -> str:
+    """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
+    return address.replace("+", "-").replace("/", "_")
+
+
+def _normalize_symbol(symbol: str) -> str:
+    """Нормализует символ жетона (USD₮ → USDT, ₿TC → BTC)."""
+    if not symbol:
+        return symbol
+    return symbol.replace("₮", "T").replace("₿", "B").replace("₴", "S")
+
+
 def get_account_info(address: str) -> dict:
     """
     Получает информацию об аккаунте через TonAPI.
@@ -252,15 +264,14 @@ def get_account_info(address: str) -> dict:
     Returns:
         dict с balance, status, и другими данными
     """
-    # TonAPI принимает адрес как есть (user-friendly или raw с URL-encoding)
-    # Проще использовать user-friendly формат
+    # TonAPI требует URL-safe адреса (- и _ вместо + и /)
     try:
         if ":" in address:
             addr = raw_to_friendly(address)
         else:
-            addr = address
+            addr = _make_url_safe(address)
     except:
-        addr = address
+        addr = _make_url_safe(address)
 
     result = tonapi_request(f"/accounts/{addr}")
 
@@ -292,13 +303,14 @@ def get_jetton_balances(address: str) -> dict:
     Returns:
         dict со списком жетонов и их балансов
     """
+    # TonAPI требует URL-safe адреса (- и _ вместо + и /)
     try:
         if ":" in address:
             addr = raw_to_friendly(address)
         else:
-            addr = address
+            addr = _make_url_safe(address)
     except:
-        addr = address
+        addr = _make_url_safe(address)
 
     result = tonapi_request(f"/accounts/{addr}/jettons")
 
@@ -308,9 +320,11 @@ def get_jetton_balances(address: str) -> dict:
 
         for item in balances:
             jetton = item.get("jetton", {})
+            raw_symbol = jetton.get("symbol", "???")
             jettons.append(
                 {
-                    "symbol": jetton.get("symbol", "???"),
+                    "symbol": _normalize_symbol(raw_symbol),
+                    "symbol_raw": raw_symbol,
                     "name": jetton.get("name", "Unknown"),
                     "balance": item.get("balance", "0"),
                     "decimals": jetton.get("decimals", 9),

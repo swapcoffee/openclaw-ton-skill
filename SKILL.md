@@ -367,6 +367,27 @@ python nft.py collection --address EQCV... --filter onsale --limit 20
 python nft.py search --query "TON Diamonds"
 ```
 
+### Floor Price
+
+Get floor price for known collections:
+
+```bash
+# Anonymous Telegram Numbers
+python nft.py floor --collection anon
+python nft.py floor --collection anonymous-numbers
+python nft.py floor --collection numbers
+
+# Telegram Usernames
+python nft.py floor --collection usernames
+
+# By address
+python nft.py floor --collection EQAOQdwdw8kGftJCSFgOErM1mBjYPe4DBPq8-AhF6vr9si5N
+```
+
+Supported aliases:
+- `anon`, `anonymous-numbers`, `numbers` → Anonymous Telegram Numbers
+- `usernames`, `username` → Telegram Usernames
+
 ### Telegram Gifts on Sale
 
 ```bash
