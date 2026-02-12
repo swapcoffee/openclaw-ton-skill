@@ -34,7 +34,11 @@ If wallets exist and monitor is NOT running:
 3. Alert the user on any incoming/outgoing transfer, swap, or NFT event
 4. Clear the log after processing
 
-This ensures real-time transaction alerts are always active when wallets are managed.
+**After creating or importing a new wallet**, always:
+1. Restart the monitor to pick up the new wallet: `python monitor.py stop && python monitor.py start -p <password> --daemon`
+2. If monitor cron doesn't exist yet, create it
+
+This ensures real-time transaction alerts are always active for ALL wallets.
 
 ## Setup
 
