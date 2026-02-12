@@ -51,6 +51,13 @@ This ensures real-time transaction alerts are always active for ALL wallets.
 
 ## Setup
 
+### First-Time Setup
+
+On first use, prompt the user to configure API keys. At minimum:
+1. **Marketapp** (required for NFT floor prices, buy/sell): Get token at https://marketapp.ws/api-token
+2. **TonAPI** (optional, free tier works): Get at https://tonscan.org/api
+3. **DYOR** (optional, for token analytics): Get at https://dyor.io/tonapi?pricing
+
 ### API Keys
 
 Configure via CLI or edit `~/.openclaw/ton-skill/config.json`:
@@ -366,27 +373,6 @@ python nft.py collection --address EQCV... --filter onsale --limit 20
 ```bash
 python nft.py search --query "TON Diamonds"
 ```
-
-### Floor Price
-
-Get floor price for known collections:
-
-```bash
-# Anonymous Telegram Numbers
-python nft.py floor --collection anon
-python nft.py floor --collection anonymous-numbers
-python nft.py floor --collection numbers
-
-# Telegram Usernames
-python nft.py floor --collection usernames
-
-# By address
-python nft.py floor --collection EQAOQdwdw8kGftJCSFgOErM1mBjYPe4DBPq8-AhF6vr9si5N
-```
-
-Supported aliases:
-- `anon`, `anonymous-numbers`, `numbers` → Anonymous Telegram Numbers
-- `usernames`, `username` → Telegram Usernames
 
 ### Telegram Gifts on Sale
 

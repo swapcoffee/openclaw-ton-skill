@@ -31,6 +31,11 @@ from utils import tonapi_request, api_request, normalize_address, load_config
 from dns import resolve_address, is_ton_domain
 from wallet import WalletStorage
 
+
+def _make_url_safe(address: str) -> str:
+    """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
+    return address.replace("+", "-").replace("/", "_")
+
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum
@@ -147,7 +152,8 @@ def create_wallet_instance(wallet_data: dict):
 
 def get_seqno(address: str) -> int:
     """Получает текущий seqno кошелька."""
-    result = tonapi_request(f"/wallet/{address}/seqno")
+    addr_safe = _make_url_safe(address)
+    result = tonapi_request(f"/wallet/{addr_safe}/seqno")
 
     if result["success"]:
         return result["data"].get("seqno", 0)
@@ -312,9 +318,9 @@ def get_nft_info(nft_address: str) -> dict:
         dict с информацией об NFT
     """
     try:
-        api_address = normalize_address(nft_address, "friendly")
+        api_address = _make_url_safe(normalize_address(nft_address, "friendly"))
     except:
-        api_address = nft_address
+        api_address = _make_url_safe(nft_address)
 
     # Запрос к Marketapp (может вернуть ошибку если ключ не настроен)
     marketapp_result = marketapp_request(f"/nfts/{api_address}/")
@@ -451,9 +457,9 @@ def get_collection_info(
         dict с информацией о коллекции
     """
     try:
-        api_address = normalize_address(collection_address, "friendly")
+        api_address = _make_url_safe(normalize_address(collection_address, "friendly"))
     except:
-        api_address = collection_address
+        api_address = _make_url_safe(collection_address)
 
     # TonAPI для метаданных (всегда пробуем)
     tonapi_result = tonapi_request(f"/nfts/collections/{api_address}")
@@ -584,9 +590,9 @@ def get_collection_floor(collection: str) -> dict:
     collection_address = resolve_collection_alias(collection)
     
     try:
-        api_address = normalize_address(collection_address, "friendly")
+        api_address = _make_url_safe(normalize_address(collection_address, "friendly"))
     except:
-        api_address = collection_address
+        api_address = _make_url_safe(collection_address)
     
     # Method 1: Try to get from /collections/ list (has floor in extra_data)
     collections_result = marketapp_request("/collections/")
@@ -733,7 +739,7 @@ def search_collections(query: str, limit: int = 10) -> dict:
             address = addr_info.get("address")
             name = addr_info.get("name")
 
-            coll_result = tonapi_request(f"/nfts/collections/{address}")
+            coll_result = tonapi_request(f"/nfts/collections/{_make_url_safe(address)}")
 
             if coll_result["success"]:
                 coll_data = coll_result["data"]

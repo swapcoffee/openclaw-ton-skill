@@ -27,6 +27,11 @@ sys.path.insert(0, str(script_dir))
 
 from utils import api_request, tonapi_request, load_config, is_valid_address
 
+
+def _make_url_safe(address: str) -> str:
+    """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
+    return address.replace("+", "-").replace("/", "_")
+
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum

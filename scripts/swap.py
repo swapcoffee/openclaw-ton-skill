@@ -147,7 +147,8 @@ def get_token_info(token_address: str) -> dict:
         return {"address": "native", "symbol": "TON", "name": "Toncoin", "decimals": 9}
 
     # Запрос к TonAPI
-    result = tonapi_request(f"/jettons/{token_address}")
+    addr_safe = _make_url_safe(token_address)
+    result = tonapi_request(f"/jettons/{addr_safe}")
     if result["success"]:
         data = result["data"]
         return {
@@ -406,13 +407,15 @@ def create_wallet_instance(wallet_data: dict):
 
 def get_seqno(address: str) -> int:
     """Получает seqno кошелька."""
+    addr_safe = _make_url_safe(address)
+    
     # Пробуем /v2/wallet/{address}/seqno
-    result = tonapi_request(f"/wallet/{address}/seqno")
+    result = tonapi_request(f"/wallet/{addr_safe}/seqno")
     if result["success"]:
         return result["data"].get("seqno", 0)
     
     # Fallback: через get method
-    result = tonapi_request(f"/blockchain/accounts/{address}/methods/seqno")
+    result = tonapi_request(f"/blockchain/accounts/{addr_safe}/methods/seqno")
     if result["success"]:
         decoded = result["data"].get("decoded", {})
         # Может вернуть как {"seqno": N} или просто число
