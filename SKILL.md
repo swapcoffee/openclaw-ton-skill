@@ -565,8 +565,43 @@ Example confirmation message:
 ```
 
 When user clicks:
-- `ton_tx_confirm` → execute with `--confirm`, report result
-- `ton_tx_cancel` → reply "Отменено ✅", do NOT execute
+- `ton_tx_confirm` → **immediately** send pre-signed BOCs from `/tmp/ton_pending_tx.json`, report result
+- `ton_tx_cancel` → reply "Отменено ✅", delete `/tmp/ton_pending_tx.json`
+
+### Pre-signing Flow (CRITICAL for fast response)
+
+When preparing a transaction for confirmation:
+1. Build transactions via API
+2. Sign ALL transactions with wallet (get seqno, create transfer messages)
+3. Save signed BOCs to `/tmp/ton_pending_tx.json`:
+```json
+{
+  "description": "Deposit 7.2 TON + 10 USDT → Coffee DEX",
+  "txs": [
+    {"boc": "base64...", "amount_ton": 7.4, "to": "0:db2e..."},
+    {"boc": "base64...", "amount_ton": 0.19, "to": "0:2b25..."}
+  ],
+  "query_id": 123456,
+  "created_at": 1234567890
+}
+```
+4. Show confirmation message with inline buttons
+5. When `ton_tx_confirm` arrives → just POST each BOC to `/blockchain/message`, done!
+
+**DO NOT re-build or re-sign on confirm!** The BOCs are ready to send.
+If pending TX is older than 60 seconds, re-sign before sending (valid_until expires).
+
+### Handling callback_data
+
+When you receive a message matching `ton_tx_confirm`:
+1. Read `/tmp/ton_pending_tx.json`
+2. Send each `boc` via TonAPI
+3. Reply with ✅ result
+4. Delete the pending file
+
+When you receive `ton_tx_cancel`:
+1. Delete `/tmp/ton_pending_tx.json`
+2. Reply "Отменено ✅"
 
 ### Limits
 
