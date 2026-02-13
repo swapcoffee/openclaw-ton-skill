@@ -86,6 +86,8 @@ def get_dex_statistics() -> dict:
     
     GET /v1/statistics
     
+    Note: This endpoint may not be available. Use stats-volume or stats-tokens instead.
+    
     Returns:
         dict with DEX statistics
     """
@@ -95,6 +97,15 @@ def get_dex_statistics() -> dict:
         return {
             "success": True,
             "statistics": result["data"],
+        }
+    
+    # Handle 404 specifically
+    if result.get("status_code") == 404:
+        return {
+            "success": False,
+            "error": "Statistics endpoint not available. This API endpoint may have been removed or changed.",
+            "status_code": 404,
+            "suggestion": "Try using 'stats-volume' or 'stats-tokens' commands instead",
         }
     
     return {
@@ -409,6 +420,15 @@ def get_profile_history(
             "page": page,
             "history": history,
             "total_count": data.get("total_count") if isinstance(data, dict) else None,
+        }
+    
+    # Handle 404 specifically
+    if result.get("status_code") == 404:
+        return {
+            "success": False,
+            "error": "Profile history endpoint not available. This API endpoint may have been removed or changed.",
+            "status_code": 404,
+            "suggestion": "The /v1/profile/{address}/transactions endpoint may not be available. Check swap.coffee API documentation for current endpoints.",
         }
     
     return {
