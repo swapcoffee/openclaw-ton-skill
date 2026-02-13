@@ -410,6 +410,10 @@ def transfer_ton(
     if not TONSDK_AVAILABLE:
         return {"success": False, "error": "tonsdk not installed"}
 
+    # Валидация суммы
+    if amount_ton is None or amount_ton <= 0:
+        return {"success": False, "error": "Amount must be positive"}
+
     # 1. Резолвим адрес получателя
     resolved = resolve_address(to_address)
     if not resolved["success"]:
@@ -508,6 +512,14 @@ def transfer_jetton(
     """
     if not TONSDK_AVAILABLE:
         return {"success": False, "error": "tonsdk not installed"}
+
+    # Валидация суммы
+    if amount is None or amount <= 0:
+        return {"success": False, "error": "Amount must be positive"}
+
+    # Валидация jetton
+    if not jetton or not jetton.strip():
+        return {"success": False, "error": "Jetton symbol or address is required"}
 
     # 1. Резолвим получателя
     resolved = resolve_address(to_address)

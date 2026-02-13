@@ -23,6 +23,18 @@ from utils import tonapi_request, is_valid_address, raw_to_friendly, normalize_a
 # =============================================================================
 
 
+def _format_dns_error(error) -> str:
+    """Форматирует ошибку DNS в читаемый вид."""
+    if isinstance(error, dict):
+        inner_error = error.get("error", "")
+        if "not resolved" in str(inner_error):
+            return "Domain not found or has no wallet address"
+        if "entity not found" in str(inner_error):
+            return "Domain does not exist"
+        return str(inner_error) if inner_error else "Unknown DNS error"
+    return str(error)
+
+
 def resolve_domain(domain: str) -> dict:
     """
     Резолвит .ton домен в адрес.
@@ -48,7 +60,7 @@ def resolve_domain(domain: str) -> dict:
         return {
             "success": False,
             "domain": domain_clean,
-            "error": result.get("error", "Failed to resolve domain"),
+            "error": _format_dns_error(result.get("error", "Failed to resolve domain")),
         }
 
     data = result["data"]
