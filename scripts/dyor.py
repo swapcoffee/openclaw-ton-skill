@@ -31,26 +31,21 @@ from utils import (
     is_valid_address,
     tonapi_request,
 )
+from common import (
+    KNOWN_TOKENS,
+    DYOR_API_BASE_URL,
+    TRUST_LEVEL_MAP,
+    format_price,
+    format_large_number,
+    COMMON_EPILOG,
+)
 
 
 # =============================================================================
 # Constants
 # =============================================================================
 
-DYOR_API_BASE = "https://dyor.io/api/v1"
-
-# Известные токены (symbol -> address)
-KNOWN_TOKENS = {
-    "TON": "native",
-    "USDT": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
-    "USDC": "EQC61IQRl0_la95t27xhIpjxZt32vl1QQVF2UgTNuvD18W-4",
-    "NOT": "EQAvlWFDxGF2lXm67y4yzC17wYKD9A0guwPkMs1gOsM__NOT",
-    "STON": "EQA2kCVNwVsil2EM2mB0SkXytxCqWFOx9ySUfP2qVLZMSgHD",
-    "SCALE": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
-    "DUST": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
-    "GRAM": "EQC47093oX5Xhb0xuk2lCr2RhS8rj-vul61u4W2UH5ORmG_O",
-    "JETTON": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
-}
+DYOR_API_BASE = DYOR_API_BASE_URL
 
 
 # =============================================================================

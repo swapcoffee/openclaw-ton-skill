@@ -24,58 +24,23 @@ from datetime import datetime, timezone
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import api_request, is_valid_address, normalize_address
+from utils import is_valid_address, normalize_address, tokens_api_request
+from common import (
+    VERIFICATION_LEVELS,
+    format_price,
+    format_large_number,
+)
 
 
 # =============================================================================
 # Constants
 # =============================================================================
 
-TOKENS_API_BASE = "https://tokens.swap.coffee"
-
-# Verification levels
-VERIFICATION_LEVELS = ["WHITELISTED", "COMMUNITY", "UNKNOWN", "BLACKLISTED"]
-
-# Search kinds
+# Search kinds for hybrid-search endpoint
 SEARCH_KINDS = ["ALL", "DEXES", "MEMES_ALL", "MEMES_DEXES", "MEMES_MEMEPADS"]
 
-# Sort options
+# Sort options for search results
 SORT_OPTIONS = ["FDMC", "TVL", "MCAP", "VOLUME_24H", "PRICE_CHANGE_24H"]
-
-
-# =============================================================================
-# API Client
-# =============================================================================
-
-
-def tokens_api_request(
-    endpoint: str,
-    method: str = "GET",
-    params: Optional[dict] = None,
-    json_data: Optional[dict] = None,
-) -> dict:
-    """
-    Request to swap.coffee Tokens API.
-
-    Args:
-        endpoint: Endpoint (e.g., "/api/v3/jettons")
-        method: HTTP method
-        params: Query parameters
-        json_data: JSON body
-
-    Returns:
-        dict with result
-    """
-    url = f"{TOKENS_API_BASE}{endpoint}"
-
-    return api_request(
-        url=url,
-        method=method,
-        params=params,
-        json_data=json_data,
-        timeout=30,
-        retries=3,
-    )
 
 
 # =============================================================================
@@ -492,34 +457,13 @@ def _format_memepad_stats(stats: dict) -> dict:
 
 
 def _format_price(price: Optional[float]) -> str:
-    """Format price for display."""
-    if price is None:
-        return "N/A"
-    if price < 0.0001:
-        return f"${price:.8f}"
-    elif price < 1:
-        return f"${price:.6f}"
-    elif price < 100:
-        return f"${price:.4f}"
-    else:
-        return f"${price:,.2f}"
+    """Format price for display. Delegates to common.format_price."""
+    return format_price(price)
 
 
 def _format_large_number(num: Optional[float]) -> str:
-    """Format large number (1.5M, 2.3B, etc.)."""
-    if num is None:
-        return "N/A"
-
-    num = float(num)
-
-    if num >= 1_000_000_000:
-        return f"${num / 1_000_000_000:.2f}B"
-    elif num >= 1_000_000:
-        return f"${num / 1_000_000:.2f}M"
-    elif num >= 1_000:
-        return f"${num / 1_000:.2f}K"
-    else:
-        return f"${num:,.2f}"
+    """Format large number (1.5M, 2.3B, etc.). Delegates to common.format_large_number."""
+    return format_large_number(num)
 
 
 # =============================================================================

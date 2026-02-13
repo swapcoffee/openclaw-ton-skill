@@ -484,6 +484,129 @@ def api_request(
 
 
 # =============================================================================
+# swap.coffee API helpers
+# =============================================================================
+
+
+def get_swap_coffee_key() -> Optional[str]:
+    """Get swap.coffee API key from config or environment."""
+    import os
+    config = load_config()
+    return config.get("swap_coffee_key") or os.environ.get("SWAP_COFFEE_KEY")
+
+
+def swap_coffee_request(
+    endpoint: str,
+    method: str = "GET",
+    params: Optional[dict] = None,
+    json_data: Optional[dict] = None,
+    version: str = "v1",
+    timeout: int = 30,
+    retries: int = 3,
+) -> dict:
+    """
+    Request to swap.coffee API with automatic X-Api-Key header.
+
+    Args:
+        endpoint: API endpoint (e.g., "/route")
+        method: HTTP method
+        params: Query parameters
+        json_data: JSON body
+        version: API version ("v1", "v2", or "" for base)
+        timeout: Request timeout in seconds
+        retries: Number of retry attempts
+
+    Returns:
+        dict with keys: success, data/error, status_code
+
+    Examples:
+        >>> swap_coffee_request("/route", method="POST", json_data={...}, version="v1")
+        >>> swap_coffee_request("/route/transactions", method="POST", json_data={...}, version="v2")
+    """
+    # Determine base URL based on version
+    if version == "v2":
+        base_url = "https://backend.swap.coffee/v2"
+    elif version == "v1":
+        base_url = "https://backend.swap.coffee/v1"
+    else:
+        base_url = "https://backend.swap.coffee"
+
+    url = f"{base_url}{endpoint}"
+
+    # Build headers with X-Api-Key
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    api_key = get_swap_coffee_key()
+    if api_key:
+        headers["X-Api-Key"] = api_key
+
+    return api_request(
+        url=url,
+        method=method,
+        headers=headers,
+        params=params,
+        json_data=json_data,
+        timeout=timeout,
+        retries=retries,
+    )
+
+
+def tokens_api_request(
+    endpoint: str,
+    method: str = "GET",
+    params: Optional[dict] = None,
+    json_data: Optional[dict] = None,
+    timeout: int = 30,
+    retries: int = 3,
+) -> dict:
+    """
+    Request to swap.coffee Tokens API (tokens.swap.coffee).
+
+    The Tokens API provides token metadata, market stats, and search.
+    Uses X-Api-Key header if swap_coffee_key is configured.
+
+    Args:
+        endpoint: API endpoint (e.g., "/api/v3/jettons")
+        method: HTTP method
+        params: Query parameters
+        json_data: JSON body
+        timeout: Request timeout in seconds
+        retries: Number of retry attempts
+
+    Returns:
+        dict with keys: success, data/error, status_code
+
+    Examples:
+        >>> tokens_api_request("/api/v3/jettons", params={"search": "USDT"})
+        >>> tokens_api_request("/api/v3/jettons/{address}")
+    """
+    base_url = "https://tokens.swap.coffee"
+    url = f"{base_url}{endpoint}"
+
+    headers = {
+        "Accept": "application/json",
+    }
+
+    # Add X-Api-Key if configured
+    api_key = get_swap_coffee_key()
+    if api_key:
+        headers["X-Api-Key"] = api_key
+
+    return api_request(
+        url=url,
+        method=method,
+        headers=headers,
+        params=params,
+        json_data=json_data,
+        timeout=timeout,
+        retries=retries,
+    )
+
+
+# =============================================================================
 # TonAPI helpers
 # =============================================================================
 
