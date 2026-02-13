@@ -6,12 +6,17 @@ OpenClaw TON Skill — Yield/DeFi CLI
 - 2000 пулов из 16 протоколов
 - Детали пула (TVL, APR, объёмы)
 - Рекомендации по выбору пула
+- Депозит/вывод ликвидности (DEX пулы: stonfi_v2, dedust, tonco)
 
 Протоколы: tonstakers, stakee, bemo, bemo_v2, hipo, kton, stonfi, stonfi_v2,
            dedust, tonco, evaa, storm_trade, torch_finance, dao_lama_vault, bidask, coffee
 
-Примечание: API не поддерживает серверные фильтры — все фильтры применяются клиентски.
-Депозит/вывод ликвидности требует прямого взаимодействия с контрактами DEX.
+API Endpoints:
+- GET /v1/yield/pools — список пулов
+- GET /v1/yield/pool/{address} — детали пула
+- GET /v1/yield/pool/{pool}/{user} — позиция пользователя
+- POST /v1/yield/pool/{pool}/{user} — депозит/вывод (создаёт транзакции для TonConnect)
+- GET /v1/yield/result?query_id=... — статус транзакции
 
 Документация: https://docs.swap.coffee/technical-guides/aggregator-api/yield-internals
 """
@@ -723,25 +728,208 @@ def get_positions(wallet: str) -> dict:
 
 
 # =============================================================================
-# Deposit / Withdraw (Not supported via API)
+# Deposit / Withdraw via swap.coffee API
 # =============================================================================
 
 
-def deposit_liquidity(*args, **kwargs) -> dict:
-    """Депозит не поддерживается через API."""
+def get_user_pool_info(pool_address: str, user_address: str) -> dict:
+    """
+    Получает информацию о позиции пользователя в пуле.
+    
+    Args:
+        pool_address: Адрес пула
+        user_address: Адрес кошелька пользователя
+    
+    Returns:
+        dict с информацией о позиции
+    """
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    result = swap_coffee_request(f"/yield/pool/{pool_safe}/{user_safe}")
+    
+    if result["success"]:
+        return {
+            "success": True,
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "data": result["data"],
+        }
+    
     return {
         "success": False,
-        "error": "Deposit not supported via swap.coffee yield API",
-        "note": "API is read-only. Use DEX-specific SDKs for deposits.",
+        "error": result.get("error", "Failed to get user pool info"),
+        "status_code": result.get("status_code"),
     }
 
 
-def withdraw_liquidity(*args, **kwargs) -> dict:
-    """Вывод не поддерживается через API."""
+def deposit_liquidity(
+    pool_address: str,
+    user_address: str,
+    asset_1_amount: str,
+    asset_2_amount: str,
+    min_lp_amount: Optional[str] = None,
+) -> dict:
+    """
+    Создаёт транзакции для депозита ликвидности в DEX пул.
+    
+    Поддерживаемые DEX: stonfi_v2, dedust, tonco
+    (stonfi v1 только withdraw, tonstakers и другие стейкинг протоколы не поддерживаются)
+    
+    Args:
+        pool_address: Адрес пула
+        user_address: Адрес кошелька отправителя
+        asset_1_amount: Количество первого токена (в минимальных единицах)
+        asset_2_amount: Количество второго токена (в минимальных единицах)
+        min_lp_amount: Минимальное количество LP токенов (опционально)
+    
+    Returns:
+        dict с транзакциями для отправки через TonConnect
+    """
+    if not is_valid_address(pool_address):
+        return {"success": False, "error": f"Invalid pool address: {pool_address}"}
+    if not is_valid_address(user_address):
+        return {"success": False, "error": f"Invalid user address: {user_address}"}
+    
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    url = f"/yield/pool/{pool_safe}/{user_safe}"
+    
+    request_data = {
+        "yieldTypeResolver": "dex_provide_liquidity",
+        "user_wallet": user_address,
+        "asset_1_amount": str(asset_1_amount),
+        "asset_2_amount": str(asset_2_amount),
+    }
+    
+    if min_lp_amount:
+        request_data["min_lp_amount"] = str(min_lp_amount)
+    
+    body = {"request_data": request_data}
+    
+    result = swap_coffee_request(url, method="POST", json_data=body)
+    
+    if result["success"]:
+        transactions = result["data"]
+        return {
+            "success": True,
+            "operation": "deposit",
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "asset_1_amount": asset_1_amount,
+            "asset_2_amount": asset_2_amount,
+            "transactions_count": len(transactions) if isinstance(transactions, list) else 1,
+            "transactions": transactions,
+            "note": "Send these transactions via TonConnect to complete deposit",
+        }
+    
+    error = result.get("error", "Unknown error")
+    error_msg = error.get("error", str(error)) if isinstance(error, dict) else str(error)
+    
+    # Provide helpful error messages
+    if "Unsupported dex" in error_msg:
+        return {
+            "success": False,
+            "error": error_msg,
+            "note": "This pool type doesn't support deposits via API. "
+                    "Use stonfi_v2, dedust, or tonco pools.",
+        }
+    elif "outdated" in error_msg.lower():
+        return {
+            "success": False,
+            "error": error_msg,
+            "note": "This DEX version is outdated. Try a newer pool (e.g., stonfi_v2).",
+        }
+    
     return {
         "success": False,
-        "error": "Withdraw not supported via swap.coffee yield API",
-        "note": "API is read-only. Use DEX-specific SDKs for withdrawals.",
+        "error": error_msg,
+        "status_code": result.get("status_code"),
+    }
+
+
+def withdraw_liquidity(
+    pool_address: str,
+    user_address: str,
+    lp_amount: str,
+) -> dict:
+    """
+    Создаёт транзакцию для вывода ликвидности из DEX пула.
+    
+    Args:
+        pool_address: Адрес пула
+        user_address: Адрес кошелька пользователя
+        lp_amount: Количество LP токенов для сжигания (в минимальных единицах)
+    
+    Returns:
+        dict с транзакцией для отправки через TonConnect
+    """
+    if not is_valid_address(pool_address):
+        return {"success": False, "error": f"Invalid pool address: {pool_address}"}
+    if not is_valid_address(user_address):
+        return {"success": False, "error": f"Invalid user address: {user_address}"}
+    
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    url = f"/yield/pool/{pool_safe}/{user_safe}"
+    
+    body = {
+        "request_data": {
+            "yieldTypeResolver": "dex_withdraw_liquidity",
+            "lp_amount": str(lp_amount),
+            "user_address": user_address,
+        }
+    }
+    
+    result = swap_coffee_request(url, method="POST", json_data=body)
+    
+    if result["success"]:
+        transactions = result["data"]
+        return {
+            "success": True,
+            "operation": "withdraw",
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "lp_amount": lp_amount,
+            "transactions_count": len(transactions) if isinstance(transactions, list) else 1,
+            "transactions": transactions,
+            "note": "Send this transaction via TonConnect to complete withdrawal",
+        }
+    
+    error = result.get("error", "Unknown error")
+    error_msg = error.get("error", str(error)) if isinstance(error, dict) else str(error)
+    
+    return {
+        "success": False,
+        "error": error_msg,
+        "status_code": result.get("status_code"),
+    }
+
+
+def check_transaction_status(query_ids: List[str]) -> dict:
+    """
+    Проверяет статус транзакций по query_id.
+    
+    Args:
+        query_ids: Список query_id из ответов deposit/withdraw
+    
+    Returns:
+        dict со статусами транзакций
+    """
+    params = {"query_id": query_ids}
+    result = swap_coffee_request("/yield/result", params=params)
+    
+    if result["success"]:
+        return {
+            "success": True,
+            "statuses": result["data"],
+        }
+    
+    return {
+        "success": False,
+        "error": result.get("error", "Failed to check status"),
     }
 
 
@@ -765,30 +953,36 @@ Examples:
   %(prog)s pools --all  # all 2000 pools
   
   # Filters (client-side, fetches all pools)
-  %(prog)s pools --protocol stonfi
-  %(prog)s pools --token TON
-  %(prog)s pools --min-tvl 1000000
-  %(prog)s pools --trusted-only
   %(prog)s pools --protocol dedust --token USDT --min-tvl 100000
   
   # Pool details
   %(prog)s pool --id EQD...abc
   
   # Recommendations (fetches all pools for analysis)
-  %(prog)s recommend --risk low
-  %(prog)s recommend --token TON --risk medium
+  %(prog)s recommend --risk low --token TON
   
-  # LP positions
+  # Deposit liquidity (returns transactions for TonConnect)
+  %(prog)s deposit --pool EQA-X_yo... --wallet EQAT... --amount1 1000000000 --amount2 1000000000
+  
+  # Withdraw liquidity (returns transaction for TonConnect)
+  %(prog)s withdraw --pool EQA-X_yo... --wallet EQAT... --lp-amount 1000000000
+  
+  # Check user position in pool
+  %(prog)s user-info --pool EQA-X_yo... --wallet EQAT...
+  
+  # Check transaction status
+  %(prog)s tx-status --query-id 1697643564986267
+  
+  # LP positions (via TonAPI)
   %(prog)s positions --wallet EQD...xyz
 
 Protocols (16): tonstakers, stakee, bemo, bemo_v2, hipo, kton, stonfi,
                 stonfi_v2, dedust, tonco, evaa, storm_trade, torch_finance,
                 dao_lama_vault, bidask, coffee
 
-Total: 2000 pools | Max per page: 100 | Cache: 5 min
-
-Note: Server-side filters don't work — all filtering is client-side.
-      Deposit/withdraw require direct DEX contract interaction.
+Deposit/Withdraw support: stonfi_v2, dedust, tonco (DEX pools only)
+                          stonfi v1 only supports withdraw
+                          Staking pools (tonstakers, etc.) not supported
 """,
     )
 
@@ -825,20 +1019,28 @@ Note: Server-side filters don't work — all filtering is client-side.
     )
     rec_p.add_argument("--amount", "-a", type=float, help="Investment amount (info only)")
 
-    # --- deposit (not supported) ---
-    dep_p = subparsers.add_parser("deposit", help="NOT SUPPORTED via API")
-    dep_p.add_argument("--pool", help="Pool address")
-    dep_p.add_argument("--amount", "-a", type=float, help="Amount")
-    dep_p.add_argument("--wallet", "-w", help="Wallet")
-    dep_p.add_argument("--token", "-t", help="Token")
-    dep_p.add_argument("--confirm", action="store_true")
+    # --- deposit ---
+    dep_p = subparsers.add_parser("deposit", help="Deposit liquidity into DEX pool")
+    dep_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    dep_p.add_argument("--wallet", "-w", required=True, help="Sender wallet address")
+    dep_p.add_argument("--amount1", "-a1", required=True, help="Amount of first token (nanotons/min units)")
+    dep_p.add_argument("--amount2", "-a2", required=True, help="Amount of second token (nanotons/min units)")
+    dep_p.add_argument("--min-lp", help="Minimum LP tokens to receive (optional)")
 
-    # --- withdraw (not supported) ---
-    with_p = subparsers.add_parser("withdraw", help="NOT SUPPORTED via API")
-    with_p.add_argument("--pool", help="Pool address")
-    with_p.add_argument("--wallet", "-w", help="Wallet")
-    with_p.add_argument("--percentage", type=float, help="Percentage")
-    with_p.add_argument("--confirm", action="store_true")
+    # --- withdraw ---
+    with_p = subparsers.add_parser("withdraw", help="Withdraw liquidity from DEX pool")
+    with_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    with_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
+    with_p.add_argument("--lp-amount", "-l", required=True, help="LP tokens to burn (min units)")
+    
+    # --- user-info ---
+    uinfo_p = subparsers.add_parser("user-info", help="Get user position in pool")
+    uinfo_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    uinfo_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
+    
+    # --- tx-status ---
+    txs_p = subparsers.add_parser("tx-status", help="Check transaction status")
+    txs_p.add_argument("--query-id", "-q", required=True, nargs="+", help="Query ID(s) from deposit/withdraw")
 
     # --- positions ---
     pos_p = subparsers.add_parser("positions", help="View LP positions (via TonAPI)")
@@ -882,10 +1084,29 @@ Note: Server-side filters don't work — all filtering is client-side.
             )
 
         elif args.command == "deposit":
-            result = deposit_liquidity()
+            result = deposit_liquidity(
+                pool_address=args.pool,
+                user_address=args.wallet,
+                asset_1_amount=args.amount1,
+                asset_2_amount=args.amount2,
+                min_lp_amount=getattr(args, "min_lp", None),
+            )
 
         elif args.command == "withdraw":
-            result = withdraw_liquidity()
+            result = withdraw_liquidity(
+                pool_address=args.pool,
+                user_address=args.wallet,
+                lp_amount=args.lp_amount,
+            )
+        
+        elif args.command == "user-info":
+            result = get_user_pool_info(
+                pool_address=args.pool,
+                user_address=args.wallet,
+            )
+        
+        elif args.command == "tx-status":
+            result = check_transaction_status(args.query_id)
 
         elif args.command == "positions":
             result = get_positions(args.wallet)
