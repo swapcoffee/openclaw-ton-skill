@@ -9,11 +9,11 @@ Available Features:
 
 API Base: https://backend.swap.coffee/v1
 
-Profile Endpoints:
-- GET  /v1/profile/history   — Historical transactions
-- POST /v1/profile/proof     — Validate TON proof
-- GET  /v1/profile/settings  — Get user settings
-- POST /v1/profile/settings  — Update user settings
+Profile Endpoints (from official SDK):
+- GET  /v1/profile/{address}/transactions  — Historical transactions
+- POST /v1/profile/{address}/proof         — Validate TON proof
+- GET  /v1/profile/{address}/settings      — Get user settings
+- POST /v1/profile/{address}/settings      — Update user settings
 """
 
 import os
@@ -364,7 +364,7 @@ def get_profile_history(
     """
     Get historical transactions for wallet.
     
-    GET /v1/profile/history
+    GET /v1/profile/{address}/transactions
     
     Args:
         wallet_address: User wallet address
@@ -378,8 +378,9 @@ def get_profile_history(
     if not is_valid_address(wallet_address):
         return {"success": False, "error": f"Invalid wallet address: {wallet_address}"}
     
+    addr_safe = _make_url_safe(wallet_address)
+    
     params = {
-        "wallet_address": _make_url_safe(wallet_address),
         "page": page,
         "size": min(size, 100),
     }
@@ -393,7 +394,7 @@ def get_profile_history(
         headers["X-Api-Key"] = api_key
     
     result = api_request(
-        url=f"{SWAP_COFFEE_API}/v1/profile/history",
+        url=f"{SWAP_COFFEE_API}/v1/profile/{addr_safe}/transactions",
         method="GET",
         headers=headers,
         params=params,
@@ -424,7 +425,7 @@ def validate_ton_proof(
     """
     Validate TON proof for wallet ownership.
     
-    POST /v1/profile/proof
+    POST /v1/profile/{address}/proof
     
     Args:
         address: Wallet address
@@ -433,15 +434,12 @@ def validate_ton_proof(
     Returns:
         dict with validation result
     """
-    json_data = {
-        "address": address,
-        "proof": proof,
-    }
+    addr_safe = _make_url_safe(address)
     
     result = swap_coffee_request(
-        "/profile/proof",
+        f"/profile/{addr_safe}/proof",
         method="POST",
-        json_data=json_data,
+        json_data=proof,
     )
     
     if result["success"]:
@@ -466,7 +464,7 @@ def get_profile_settings(
     """
     Get user settings.
     
-    GET /v1/profile/settings
+    GET /v1/profile/{address}/settings
     
     Args:
         wallet_address: User wallet address
@@ -478,7 +476,7 @@ def get_profile_settings(
     if not is_valid_address(wallet_address):
         return {"success": False, "error": f"Invalid wallet address: {wallet_address}"}
     
-    params = {"wallet_address": _make_url_safe(wallet_address)}
+    addr_safe = _make_url_safe(wallet_address)
     
     headers = {"Content-Type": "application/json"}
     if xverify:
@@ -489,10 +487,9 @@ def get_profile_settings(
         headers["X-Api-Key"] = api_key
     
     result = api_request(
-        url=f"{SWAP_COFFEE_API}/v1/profile/settings",
+        url=f"{SWAP_COFFEE_API}/v1/profile/{addr_safe}/settings",
         method="GET",
         headers=headers,
-        params=params,
     )
     
     if result["success"]:
@@ -517,7 +514,7 @@ def update_profile_settings(
     """
     Update user settings.
     
-    POST /v1/profile/settings
+    POST /v1/profile/{address}/settings
     
     Args:
         wallet_address: User wallet address
@@ -530,10 +527,7 @@ def update_profile_settings(
     if not is_valid_address(wallet_address):
         return {"success": False, "error": f"Invalid wallet address: {wallet_address}"}
     
-    json_data = {
-        "wallet_address": wallet_address,
-        **settings,
-    }
+    addr_safe = _make_url_safe(wallet_address)
     
     headers = {
         "Content-Type": "application/json",
@@ -545,10 +539,10 @@ def update_profile_settings(
         headers["X-Api-Key"] = api_key
     
     result = api_request(
-        url=f"{SWAP_COFFEE_API}/v1/profile/settings",
+        url=f"{SWAP_COFFEE_API}/v1/profile/{addr_safe}/settings",
         method="POST",
         headers=headers,
-        json_data=json_data,
+        json_data=settings,
     )
     
     if result["success"]:

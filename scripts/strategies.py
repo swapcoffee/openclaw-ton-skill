@@ -11,16 +11,16 @@ Architecture:
 - User sends funds + messages to this contract to create/cancel orders
 - Backend executes orders off-chain and initiates transactions on the wallet
 
-API Endpoints:
-- GET  /v1/strategies/wallets                    — Check if strategies wallet exists
-- POST /v1/strategies/wallets                    — Create strategies wallet (one-time)
-- GET  /v1/strategies/eligibility                — Check if user is eligible
-- GET  /v1/strategies/eligibility/from-tokens    — Get eligible from-tokens
-- GET  /v1/strategies/eligibility/to-tokens      — Get eligible to-tokens
-- POST /v1/strategies/orders                     — Create order (returns tx to sign)
-- GET  /v1/strategies/orders                     — List orders
-- GET  /v1/strategies/orders/{id}                — Get order details
-- DELETE /v1/strategies/orders/{id}              — Cancel order (returns tx to sign)
+API Endpoints (from official SDK):
+- GET  /v1/strategies/{address}/wallet                   — Check if strategies wallet exists
+- POST /v1/strategies/{address}/wallet                   — Create strategies wallet (one-time)
+- GET  /v1/strategies/eligibility/user/{address}         — Check if user is eligible
+- GET  /v1/strategies/eligibility/from-tokens?type=X     — Get eligible from-tokens
+- GET  /v1/strategies/eligibility/to-tokens/{from}?type=X — Get eligible to-tokens for from-token
+- POST /v1/strategies/{address}/order                    — Create order (returns tx to sign)
+- GET  /v1/strategies/{address}/orders                   — List orders
+- GET  /v1/strategies/{address}/order?id=X               — Get order details
+- DELETE /v1/strategies/{address}/order?id=X              — Cancel order (returns tx to sign)
 
 Authentication:
 Most endpoints require `x-verify` header containing a TonConnect proof signature.
@@ -379,18 +379,18 @@ def check_strategy_wallet(wallet_address: str, xverify: Optional[str] = None) ->
     """
     Check if strategies wallet exists for the user.
     
-    GET /v1/strategy/wallets?wallet_address=USER_ADDR
+    GET /v1/strategies/{address}/wallet
     
     Args:
         wallet_address: User's wallet address
-        xverify: x-verify header (TonConnect proof)
+        xverify: x-verify header (TonConnect proof) - required
     
     Returns:
         dict with wallet status
     """
-    params = {"wallet_address": _make_url_safe(wallet_address)}
+    addr_safe = _make_url_safe(wallet_address)
     
-    result = strategy_request("/wallets", params=params, xverify=xverify)
+    result = strategy_request(f"/{addr_safe}/wallet", xverify=xverify)
     
     if not result["success"]:
         if result.get("status_code") == 404:
@@ -423,7 +423,7 @@ def create_strategy_wallet(wallet_address: str, xverify: str) -> dict:
     """
     Create strategies wallet (one-time deployment).
     
-    POST /v1/strategy/wallets
+    POST /v1/strategies/{address}/wallet
     
     Args:
         wallet_address: User's wallet address
@@ -432,12 +432,12 @@ def create_strategy_wallet(wallet_address: str, xverify: str) -> dict:
     Returns:
         dict with transaction to sign and send
     """
+    addr_safe = _make_url_safe(wallet_address)
+    
     result = strategy_request(
-        "/wallets",
+        f"/{addr_safe}/wallet",
         method="POST",
-        json_data={"wallet_address": wallet_address},
         xverify=xverify,
-        wallet_address=wallet_address,
     )
     
     if not result["success"]:
@@ -462,21 +462,22 @@ def create_strategy_wallet(wallet_address: str, xverify: str) -> dict:
     }
 
 
-def check_eligibility(wallet_address: str) -> dict:
+def check_eligibility(wallet_address: str, xverify: Optional[str] = None) -> dict:
     """
     Check if wallet is eligible for strategies.
     
-    GET /v1/strategy/eligibility?wallet_address=USER_ADDR
+    GET /v1/strategies/eligibility/user/{address}
     
     Args:
         wallet_address: User's wallet address
+        xverify: x-verify header (required)
     
     Returns:
         dict with eligibility info
     """
-    params = {"wallet_address": _make_url_safe(wallet_address)}
+    addr_safe = _make_url_safe(wallet_address)
     
-    result = strategy_request("/eligibility", params=params)
+    result = strategy_request(f"/eligibility/user/{addr_safe}", xverify=xverify)
     
     if not result["success"]:
         if result.get("status_code") == 404:
@@ -542,7 +543,7 @@ def get_to_tokens(order_type: str = "limit", from_token: str = "native") -> dict
     """
     Get eligible to-tokens for a given from-token.
     
-    GET /v1/strategy/to-tokens?type=limit&from_token=ADDR
+    GET /v1/strategies/eligibility/to-tokens/{from_token}?type=X
     
     Args:
         order_type: Order type (limit or dca)
@@ -554,8 +555,8 @@ def get_to_tokens(order_type: str = "limit", from_token: str = "native") -> dict
     if order_type not in ORDER_TYPES:
         return {"success": False, "error": f"Invalid type. Must be: {ORDER_TYPES}"}
     
-    params = {"type": order_type, "from_token": from_token}
-    result = strategy_request("/eligibility/to-tokens", params=params)
+    from_safe = _make_url_safe(from_token)
+    result = strategy_request(f"/eligibility/to-tokens/{from_safe}", params={"type": order_type})
     
     if not result["success"]:
         return {
@@ -582,26 +583,31 @@ def get_to_tokens(order_type: str = "limit", from_token: str = "native") -> dict
 def list_orders(
     wallet_address: str,
     xverify: str,
-    status: Optional[str] = None,
+    order_type: Optional[str] = None,
+    include_finished: bool = False,
 ) -> dict:
     """
     List strategy orders for wallet.
     
-    GET /v1/strategy/orders?wallet_address=USER_ADDR
+    GET /v1/strategies/{address}/orders
     
     Args:
         wallet_address: User's wallet address
         xverify: x-verify header
-        status: Filter by status (active, completed, cancelled)
+        order_type: Filter by type (limit, dca)
+        include_finished: Include completed/cancelled orders
     
     Returns:
         dict with list of orders
     """
-    params = {"wallet_address": _make_url_safe(wallet_address)}
-    if status:
-        params["status"] = status
+    addr_safe = _make_url_safe(wallet_address)
+    params = {}
+    if order_type:
+        params["type"] = order_type
+    if include_finished:
+        params["include_finished"] = "true"
     
-    result = strategy_request("/orders", params=params, xverify=xverify)
+    result = strategy_request(f"/{addr_safe}/orders", params=params if params else None, xverify=xverify)
     
     if not result["success"]:
         if result.get("status_code") == 404:
@@ -625,27 +631,27 @@ def list_orders(
         "wallet_address": wallet_address,
         "orders": orders,
         "count": len(orders),
-        "filters": {"status": status},
+        "filters": {"type": order_type, "include_finished": include_finished},
     }
 
 
-def get_order(order_id: str, wallet_address: str, xverify: Optional[str] = None) -> dict:
+def get_order(order_id: str, wallet_address: str, xverify: str) -> dict:
     """
     Get order details.
     
-    GET /v1/strategy/orders/{id}?wallet_address=USER_ADDR
+    GET /v1/strategies/{address}/order?id=X
     
     Args:
         order_id: Order ID
         wallet_address: User's wallet address
-        xverify: x-verify header
+        xverify: x-verify header (required)
     
     Returns:
         dict with order details
     """
-    params = {"wallet_address": _make_url_safe(wallet_address)}
+    addr_safe = _make_url_safe(wallet_address)
     
-    result = strategy_request(f"/orders/{order_id}", params=params, xverify=xverify)
+    result = strategy_request(f"/{addr_safe}/order", params={"id": order_id}, xverify=xverify)
     
     if not result["success"]:
         return {
@@ -676,7 +682,7 @@ def create_order(
     """
     Create a strategy order.
     
-    POST /v1/strategy/orders
+    POST /v1/strategies/{address}/order
     
     Args:
         wallet_address: User's wallet address
@@ -698,6 +704,8 @@ def create_order(
     if order_type not in ORDER_TYPES:
         return {"success": False, "error": f"Invalid type. Must be: {ORDER_TYPES}"}
     
+    addr_safe = _make_url_safe(wallet_address)
+    
     order_data = {
         "type": order_type,
         "token_from": {
@@ -716,11 +724,10 @@ def create_order(
     }
     
     result = strategy_request(
-        "/orders",
+        f"/{addr_safe}/order",
         method="POST",
         json_data=order_data,
         xverify=xverify,
-        wallet_address=wallet_address,
     )
     
     if not result["success"]:
@@ -758,7 +765,7 @@ def cancel_order(
     """
     Cancel a strategy order.
     
-    DELETE /v1/strategy/orders/{id}
+    DELETE /v1/strategies/{address}/order?id=X  (or /v1/strategies/cancel/by-id/{id})
     
     Args:
         order_id: Order ID to cancel
@@ -768,9 +775,12 @@ def cancel_order(
     Returns:
         dict with transaction to sign and send
     """
+    addr_safe = _make_url_safe(wallet_address)
+    
     result = strategy_request(
-        f"/orders/{order_id}",
+        f"/{addr_safe}/order",
         method="DELETE",
+        params={"id": order_id},
         xverify=xverify,
         wallet_address=wallet_address,
     )
@@ -1081,7 +1091,9 @@ DCA Order Settings:
     
     # --- eligible ---
     elig_p = subparsers.add_parser("eligible", help="Check if wallet is eligible")
-    elig_p.add_argument("--address", "-a", required=True, help="Wallet address")
+    elig_grp = elig_p.add_mutually_exclusive_group(required=True)
+    elig_grp.add_argument("--address", "-a", help="Wallet address")
+    elig_grp.add_argument("--wallet", "-w", help="Wallet label")
     
     # --- from-tokens ---
     ft_p = subparsers.add_parser("from-tokens", help="Get eligible from-tokens")
@@ -1100,7 +1112,8 @@ DCA Order Settings:
     # --- list-orders ---
     lo_p = subparsers.add_parser("list-orders", help="List strategy orders")
     lo_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
-    lo_p.add_argument("--status", "-s", choices=ORDER_STATUSES, help="Filter by status")
+    lo_p.add_argument("--type", "-t", choices=ORDER_TYPES, help="Filter by type (limit, dca)")
+    lo_p.add_argument("--include-finished", action="store_true", help="Include completed/cancelled orders")
     
     # --- get-order ---
     go_p = subparsers.add_parser("get-order", help="Get order details")
@@ -1141,10 +1154,7 @@ DCA Order Settings:
         password = args.password or os.environ.get("WALLET_PASSWORD")
         
         # Commands that don't need wallet auth
-        if args.command == "eligible":
-            result = check_eligibility(args.address)
-        
-        elif args.command == "from-tokens":
+        if args.command == "from-tokens":
             result = get_from_tokens(args.type)
         
         elif args.command == "to-tokens":
@@ -1194,7 +1204,10 @@ DCA Order Settings:
                 }))
                 sys.exit(1)
             
-            if args.command == "create-wallet":
+            if args.command == "eligible":
+                result = check_eligibility(wallet_data["address"], xverify)
+            
+            elif args.command == "create-wallet":
                 tx_result = create_strategy_wallet(wallet_data["address"], xverify)
                 if not tx_result["success"]:
                     result = tx_result
@@ -1212,7 +1225,8 @@ DCA Order Settings:
                 result = list_orders(
                     wallet_data["address"],
                     xverify,
-                    status=args.status,
+                    order_type=getattr(args, 'type', None),
+                    include_finished=getattr(args, 'include_finished', False),
                 )
             
             elif args.command == "get-order":
@@ -1303,4 +1317,5 @@ DCA Order Settings:
 
 
 if __name__ == "__main__":
+    main()
     main()
