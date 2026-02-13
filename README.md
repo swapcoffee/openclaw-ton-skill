@@ -239,23 +239,41 @@ python monitor.py start -p <password> --daemon
 
 ## 🧪 Test Cases
 
+All test cases can be run from the `scripts/` directory.
+
 | ID | Test Case | Command | Expected Output | Status |
 |----|-----------|---------|-----------------|--------|
-| TC-001 | Create wallet | `python wallet.py create --label test` | New wallet with mnemonic | ✅ |
-| TC-002 | Check balance | `python wallet.py balance test` | TON balance in JSON | ✅ |
-| TC-003 | Get swap quote (TON → USDT) | `python swap.py quote --from TON --to USDT --amount 1 --wallet test` | Quote with rate and fees | ✅ |
-| TC-004 | Execute swap (small amount) | `python swap.py execute --wallet test --from TON --to USDT --amount 0.5 --confirm` | Swap transaction hash | ⚠️ Requires funds |
-| TC-005 | Token trust score | `python analytics.py trust --token NOT` | Trust score 0-100 with assessment | ✅ |
-| TC-006 | List yield pools | `python yield_cmd.py pools --sort apr --limit 5` | Top 5 pools by APR | ✅ |
-| TC-007 | NFT collection search | `python nft.py search --query "TON Diamonds"` | Collection list with addresses | ✅ |
-| TC-008 | Resolve .ton domain | `python dns.py resolve foundation.ton` | Wallet address | ✅ |
-| TC-009 | Get staking info | `python yield_cmd.py pools --protocol tonstakers` | TonStakers pools data | ✅ |
-| TC-010 | Create DCA order | — | Not yet implemented | ❌ |
+| **TC-001** | Create wallet | `python wallet.py create --label test-wallet` | New wallet with 24-word mnemonic | ✅ Pass |
+| **TC-002** | List wallets | `python wallet.py list` | JSON array with wallet labels and addresses | ✅ Pass |
+| **TC-003** | Check balance | `python wallet.py balance test-wallet` | TON balance in JSON format | ✅ Pass |
+| **TC-004** | Check balance with jettons | `python wallet.py balance test-wallet --full` | TON + all jetton balances | ✅ Pass |
+| **TC-005** | Get swap quote | `python swap.py quote --from TON --to USDT --amount 1 --wallet test-wallet` | Quote with rate, fees, route info | ✅ Pass |
+| **TC-006** | Swap emulation | `python swap.py execute --wallet test-wallet --from TON --to USDT --amount 0.5` | Emulation result, fee estimate (no `--confirm`) | ✅ Pass |
+| **TC-007** | Token trust score | `python analytics.py trust --token NOT` | Trust score 0-100 with assessment (HIGH/MED/LOW) | ✅ Pass |
+| **TC-008** | Token full info | `python analytics.py info --token SCALE` | Price, mcap, volume, TVL, holders | ✅ Pass |
+| **TC-009** | List yield pools | `python yield_cmd.py pools --sort apr --limit 5` | Top 5 pools sorted by APR | ✅ Pass |
+| **TC-010** | Filter pools by protocol | `python yield_cmd.py pools --protocol stonfi --limit 10` | STON.fi pools only | ✅ Pass |
+| **TC-011** | NFT collection search | `python nft.py search --query "TON Diamonds"` | Collection list with addresses | ✅ Pass |
+| **TC-012** | Resolve .ton domain | `python dns.py resolve foundation.ton` | Wallet address for domain | ✅ Pass |
+| **TC-013** | Transfer emulation | `python transfer.py ton --from test-wallet --to foundation.ton --amount 0.1` | Emulation with fee, no send | ✅ Pass |
+| **TC-014** | Invalid amount validation | `python transfer.py ton --from test-wallet --to addr --amount -5` | Error: "Amount must be positive" | ✅ Pass |
+| **TC-015** | Monitor status | `python monitor.py status` | JSON with running status, PID, wallets | ✅ Pass |
 
 ### Status Legend
-- ✅ **Working** — Tested and functional
+- ✅ **Pass** — Test passes, feature working as expected
 - ⚠️ **Conditional** — Works but requires specific conditions (funds, API key, etc.)
-- ❌ **Not Implemented** — Feature not yet available
+- ❌ **Fail** — Test fails, needs investigation
+
+### Running All Tests
+
+```bash
+# Run pytest test suite
+cd ~/.openclaw/skills/ton-blockchain
+pytest -v
+
+# Run with coverage
+pytest --cov=scripts --cov-report=term-missing
+```
 
 ---
 
