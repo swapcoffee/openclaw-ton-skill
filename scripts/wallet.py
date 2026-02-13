@@ -374,10 +374,36 @@ def get_full_balance(address: str) -> dict:
         "status": account["status"],
     }
 
+    # Получаем цену TON в USD
+    ton_price_usd = None
+    try:
+        from utils import tokens_api_request
+        # Получаем цену TON через tokens API
+        ton_info = tokens_api_request("/api/v3/jettons", params={"search": "TON", "size": 1})
+        if ton_info.get("success") and isinstance(ton_info.get("data"), list) and len(ton_info["data"]) > 0:
+            ton_data = ton_info["data"][0]
+            market_stats = ton_data.get("market_stats", {})
+            ton_price_usd = market_stats.get("price_usd")
+    except Exception:
+        pass  # Если не удалось получить цену, продолжаем без неё
+    
+    # Добавляем цену TON в результат
+    if ton_price_usd:
+        result["ton"]["price_usd"] = ton_price_usd
+        ton_balance = result["ton"]["balance"]
+        if isinstance(ton_balance, (int, float)):
+            result["ton"]["value_usd"] = float(ton_balance) * float(ton_price_usd)
+    
     # Считаем общую стоимость в USD (если есть цены)
     total_usd = 0
-
-    # TODO: добавить цену TON
+    
+    # Добавляем стоимость TON
+    if ton_price_usd and result["ton"].get("balance"):
+        ton_balance = result["ton"]["balance"]
+        if isinstance(ton_balance, (int, float)):
+            total_usd += float(ton_balance) * float(ton_price_usd)
+    
+    # Добавляем стоимость жетонов
     for j in result["jettons"]:
         if j.get("price_usd") and j.get("balance_human"):
             total_usd += float(j["price_usd"]) * float(j["balance_human"])
