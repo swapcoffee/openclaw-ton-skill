@@ -758,6 +758,11 @@ Examples:
         action="store_true",
         help="Confirm and send (otherwise just emulate)",
     )
+    ton_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Alias for emulation mode (do not send)",
+    )
 
     # --- jetton ---
     jetton_p = subparsers.add_parser("jetton", help="Transfer Jetton")
@@ -773,12 +778,26 @@ Examples:
     jetton_p.add_argument("--amount", "-a", type=float, required=True, help="Amount")
     jetton_p.add_argument("--comment", "-c", help="Transfer comment")
     jetton_p.add_argument("--confirm", action="store_true", help="Confirm and send")
+    jetton_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Alias for emulation mode (do not send)",
+    )
 
     args = parser.parse_args()
 
     if not args.command:
         parser.print_help()
         return
+
+    # Safety: forbid contradictory flags
+    if getattr(args, "dry_run", False) and getattr(args, "confirm", False):
+        print(json.dumps({"error": "Use either --confirm or --dry-run, not both."}))
+        return sys.exit(1)
+
+    # If --dry-run is set, force emulation
+    if getattr(args, "dry_run", False):
+        args.confirm = False
 
     # Проверяем зависимости
     if not TONSDK_AVAILABLE:

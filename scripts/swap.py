@@ -982,6 +982,11 @@ Use token symbols or full jetton master addresses.
         "--confirm", action="store_true", help="Confirm and execute swap"
     )
     exec_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Alias for simulation mode (do not execute on-chain)",
+    )
+    exec_p.add_argument(
         "--referral",
         "-r",
         dest="referral_address",
@@ -1061,6 +1066,15 @@ Use token symbols or full jetton master addresses.
     if not args.command:
         parser.print_help()
         return
+
+    # Safety: forbid contradictory flags
+    if getattr(args, "dry_run", False) and getattr(args, "confirm", False):
+        print(json.dumps({"error": "Use either --confirm or --dry-run, not both."}))
+        return sys.exit(1)
+
+    # If --dry-run is set, force simulation
+    if getattr(args, "dry_run", False):
+        args.confirm = False
 
     try:
         if args.command == "quote":
