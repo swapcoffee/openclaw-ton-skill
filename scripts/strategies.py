@@ -328,13 +328,26 @@ def strategy_request(
     if wallet_address:
         headers["wallet_address"] = wallet_address
     
-    return api_request(
+    result = api_request(
         url=url,
         method=method,
         headers=headers,
         params=params,
         json_data=json_data,
     )
+    
+    # Handle 404 specifically - Strategies API may not be available
+    if result.get("status_code") == 404:
+        return {
+            "success": False,
+            "error": f"Strategies API endpoint not found: {endpoint}",
+            "status_code": 404,
+            "note": "The Strategies API (/v1/strategy/*) endpoints may not be available yet. "
+                   "They might be in development/beta, require a different API version, "
+                   "or need special API key access. Check swap.coffee API documentation for current endpoints.",
+        }
+    
+    return result
 
 
 # =============================================================================
@@ -406,6 +419,15 @@ def check_strategy_wallet(wallet_address: str, xverify: Optional[str] = None) ->
     result = strategy_request(f"/{addr_safe}/wallet", xverify=xverify)
     
     if not result["success"]:
+        # Check if it's API endpoint not found (BUG-016)
+        if result.get("status_code") == 404 and result.get("note"):
+            return {
+                "success": False,
+                "error": result.get("error", "Strategies API endpoint not available"),
+                "wallet_address": wallet_address,
+                "note": result.get("note"),
+            }
+        # Otherwise assume wallet doesn't exist (normal case)
         if result.get("status_code") == 404:
             return {
                 "success": True,
