@@ -22,7 +22,7 @@
 | Token search | ✅ PASS | Search by symbol works |
 | Trust score (USDT) | ✅ PASS | Score: 90, Level: high, Whitelisted |
 | Trust score (NOT) | ✅ PASS | Score: 90, Level: high, Whitelisted |
-| Trust score (SCALE) | ✅ PASS | Score: 90, Level: high, Whitelisted |
+| Trust score (DUST) | ✅ PASS | Score: 90, Level: high, Whitelisted |
 | Price history | ❌ FAIL | "Price history not available" - needs DYOR key |
 | Analytics info | ✅ PASS | Full token info with market stats |
 | Analytics pools | ❌ FAIL | "Pools data requires DYOR API key" |
@@ -120,7 +120,7 @@ tokens.py info EQCxE6... → SUCCESS
 |-------|-------|-------|--------------|---------|
 | USDT | 90 | high | whitelist | 3,088,491 |
 | NOT | 90 | high | whitelist | 2,848,205 |
-| SCALE | 90 | high | whitelist | 23,681 |
+| DUST | 90 | high | whitelist | 23,681 |
 
 ✅ All trust scores returned correctly via TonAPI fallback
 

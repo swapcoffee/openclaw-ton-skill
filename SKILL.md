@@ -252,7 +252,7 @@ python swap.py status --hash abc123...
 python swap.py tokens
 ```
 
-Supported: TON, USDT, USDC, NOT, STON, SCALE
+Supported: TON, USDT, USDC, NOT, STON, DUST
 
 ---
 
@@ -356,7 +356,7 @@ Script: `analytics.py`
 ### Full Token Info
 
 ```bash
-python analytics.py info --token SCALE
+python analytics.py info --token DUST
 python analytics.py info --token EQBlqsm144Dq...  # By address
 ```
 
@@ -388,7 +388,7 @@ python analytics.py pools --token USDT
 ### Compare Tokens
 
 ```bash
-python analytics.py compare --tokens "SCALE,NOT,STON"
+python analytics.py compare --tokens "DUST,NOT,STON"
 ```
 
 ### API Status

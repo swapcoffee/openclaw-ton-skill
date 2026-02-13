@@ -28,13 +28,13 @@ KNOWN_TOKENS = {
     # Popular tokens
     "NOT": "EQAvlWFDxGF2lXm67y4yzC17wYKD9A0guwPkMs1gOsM__NOT",
     "STON": "EQA2kCVNwVsil2EM2mB0SkXytxCqQjS4mttjDpnXmwG9T6bO",
-    "SCALE": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
-    "DUST": "EQAhE5C_M4k6h_MF-qpBiJd4ILIpPqiVvF0TqJYRX5sSqe5L",
+    "DUST": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
     "GRAM": "EQC47093oX5Xhb0xuk2lCr2RhS8rj-vul61u4W2UH5ORmG_O",
     "BOLT": "EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw",
     "DOGS": "EQCvxJy4eG8hyHBFsZ7eePxrRsUQSFE_jpptRAYBmcG_DOGS",
     "CATS": "EQDcBkGHmc-gPJl3-UtjW6bNXvb6wj3TEqPrK_h8ffjj1Wr5",
     "MAJOR": "EQCupm9RXC8RM8c2wbWWKJCxF9YqxOaB3z0SxdXH7v-NjKqy",
+    "KINGY": "EQC-tdRjjoYMz3MXKW4pj95bNZgvRyWwZ23Jix3ph7guvHxJ",
     
     # DeFi tokens
     "STONFI": "EQDNhy-nxYFgUqzfUzl3fy4uAPTgG51IkA7-0A-MR9bJSZLt",
@@ -261,7 +261,7 @@ Configuration:
   Config file: ~/.openclaw/ton-skill/config.json
   Set API keys: python utils.py config set <key> <value>
   
-Known tokens: TON, USDT, USDC, NOT, STON, SCALE, DOGS, CATS, MAJOR, and more.
+Known tokens: TON, USDT, USDC, NOT, STON, DUST, DOGS, CATS, MAJOR, and more.
 Use token symbol or full jetton master address.
 
 For more information: https://github.com/openclaw/openclaw-ton-skill

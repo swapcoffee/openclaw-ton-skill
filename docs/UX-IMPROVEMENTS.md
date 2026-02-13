@@ -172,7 +172,7 @@ Full command names required.
 ton send 10 @alice          # Send 10 TON to contact "alice"
 ton send 10 wallet.ton      # Send 10 TON to .ton domain
 ton swap TON USDT 100       # Swap 100 TON to USDT
-ton check SCALE             # Check token trust score
+ton check DUST             # Check token trust score
 ```
 
 ---
@@ -394,7 +394,7 @@ Transactions (3):
 
 Top Movers:
   📈 NOT +12.5%
-  📉 SCALE -3.2%
+  📉 DUST -3.2%
 
 Active Yield: $45.20 earned this week
 ```
