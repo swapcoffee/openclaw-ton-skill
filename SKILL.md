@@ -2,7 +2,8 @@
 name: ton-blockchain
 description: |
   TON blockchain operations: wallet management, TON/jetton transfers, DEX swaps,
-  token analytics, yield/DeFi pools, NFT trading, and DNS resolution.
+  token analytics, yield/DeFi pools, NFT trading, DNS resolution, DCA/limit orders,
+  staking, cashback, referrals, and contests.
   
   Use when user wants to:
   - Create/import/manage TON wallets
@@ -13,6 +14,10 @@ description: |
   - Find yield pools, add/remove liquidity
   - Buy/sell/transfer NFTs
   - Resolve .ton domains
+  - Create DCA or limit orders (automated trading)
+  - Stake/unstake TON via various protocols
+  - Manage profile, cashback, claims, referrals
+  - Participate in contests and view leaderboards
 ---
 
 # TON Blockchain Skill
@@ -755,6 +760,218 @@ tail -f ~/Library/Logs/ton-monitor.log
 ```bash
 pip install sseclient-py  # For SSE mode (recommended)
 ```
+
+---
+
+## DCA & Limit Orders (Strategies)
+
+Script: `strategies.py`
+
+Create automated trading strategies via swap.coffee Strategies API.
+
+### ⚠️ IMPORTANT: Proxy Wallet Required
+
+Before creating DCA/limit orders, you MUST deploy a proxy wallet contract (one-time).
+
+**Flow:**
+1. `check` — Check if proxy wallet exists
+2. `eligible` — Check if user is eligible (optional)
+3. `create-proxy` — Deploy proxy wallet contract
+4. `create-limit` / `create-dca` — Create orders
+
+### Check Proxy Wallet Status
+
+```bash
+python strategies.py check --address UQBvW8...
+```
+
+### Check Eligibility
+
+```bash
+python strategies.py eligible --address UQBvW8...
+```
+
+### Deploy Proxy Wallet (One-Time)
+
+```bash
+python strategies.py create-proxy --wallet main --confirm
+```
+
+### Create Limit Order
+
+```bash
+# Execute when TON price reaches 5.5 USDT
+python strategies.py create-limit --wallet main --from TON --to USDT --amount 10 --price 5.5 --confirm
+```
+
+### Create DCA Order
+
+```bash
+# Buy USDT with 100 TON, split into 10 orders, every 24 hours
+python strategies.py create-dca --wallet main --from TON --to USDT --amount 100 --orders 10 --interval 24 --confirm
+```
+
+### List Orders
+
+```bash
+python strategies.py list --wallet main --status active
+python strategies.py list --wallet main --type dca
+```
+
+### Cancel Order
+
+```bash
+python strategies.py cancel --wallet main --order-id abc123 --confirm
+```
+
+---
+
+## Staking
+
+Script: `staking.py`
+
+Manage staking positions across TON staking protocols.
+
+### Supported Protocols
+
+- tonstakers
+- stakee
+- bemo, bemo_v2
+- hipo
+- kton
+
+### List Staking Pools
+
+```bash
+python staking.py pools
+python staking.py pools --protocol tonstakers --sort apr
+```
+
+### Get Pool Details
+
+```bash
+python staking.py pool --address EQCkWx...
+```
+
+### Get User Position
+
+```bash
+python staking.py position --pool EQCkWx... --wallet UQBvW8...
+```
+
+### Get All Positions
+
+```bash
+python staking.py positions --wallet UQBvW8...
+```
+
+### Get Staking Points/Rewards
+
+```bash
+python staking.py points --wallet UQBvW8...
+```
+
+### Stake Tokens
+
+```bash
+# Simulate
+python staking.py stake --pool EQCkWx... --wallet main --amount 10
+
+# Execute
+python staking.py stake --pool EQCkWx... --wallet main --amount 10 --confirm
+```
+
+### Unstake Tokens
+
+```bash
+# Partial unstake
+python staking.py unstake --pool EQCkWx... --wallet main --amount 5 --confirm
+
+# Close entire position
+python staking.py unstake --pool EQCkWx... --wallet main --close --confirm
+```
+
+### Extend Staking Period
+
+```bash
+python staking.py extend --pool EQCkWx... --wallet main --days 30 --confirm
+```
+
+---
+
+## Profile & Extras
+
+Script: `profile.py`
+
+Manage swap.coffee profile, cashback, claims, referrals, and contests.
+
+### Profile History
+
+```bash
+python profile.py profile-history --wallet EQAbc...
+python profile.py profile-summary --wallet EQAbc...
+python profile.py profile-settings --wallet EQAbc...
+```
+
+### Cashback
+
+```bash
+python profile.py cashback-info --wallet EQAbc...
+python profile.py cashback-rewards --wallet EQAbc...
+python profile.py cashback-history --wallet EQAbc...
+```
+
+### Claim Tokens
+
+```bash
+python profile.py claim-stats --wallet EQAbc...
+python profile.py claim-available --wallet EQAbc...
+python profile.py claim --wallet EQAbc... --claim-id 123
+python profile.py claim --wallet EQAbc... --all
+```
+
+### Referrals
+
+```bash
+python profile.py referral-info --wallet EQAbc...
+python profile.py referral-stats --wallet EQAbc...
+python profile.py referral-rewards --wallet EQAbc...
+python profile.py referral-bind --wallet EQAbc... --code REF123
+python profile.py referral-aliases --wallet EQAbc...
+```
+
+### DEX Statistics
+
+```bash
+python profile.py stats
+python profile.py stats-volume --period 7d
+python profile.py stats-tokens --sort volume --limit 10
+```
+
+### Contests
+
+```bash
+python profile.py contests-active
+python profile.py contest --id contest123
+python profile.py contest-leaderboard --id contest123
+python profile.py contest-position --id contest123 --wallet EQAbc...
+```
+
+---
+
+## Shared Constants
+
+Script: `common.py`
+
+Centralized configuration module (not a CLI tool):
+- Known tokens (symbol → address mapping)
+- DEX names and router addresses
+- API base URLs
+- Verification levels and trust scores
+- Formatting utilities
+- Error messages
+
+Used by other scripts for consistent token resolution and formatting.
 
 ---
 
