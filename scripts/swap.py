@@ -58,7 +58,7 @@ KNOWN_TOKENS = {
     "USDC": "EQC61IQRl0_la95t27xhIpjxZt32vl1QQVF2UgTNuvD18W-4",
     "NOT": "EQAvlWFDxGF2lXm67y4yzC17wYKD9A0guwPkMs1gOsM__NOT",
     "STON": "EQA2kCVNwVsil2EM2mB0SkXytxCqQjS4mttjDpnXmwG9T6bO",
-    "SCALE": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
+    "DUST": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
     "JETTON": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",  # Example
 }
 
@@ -791,7 +791,7 @@ Examples:
   # Список известных токенов
   %(prog)s tokens
 
-Known tokens: TON, USDT, USDC, NOT, STON, SCALE, DOGS, CATS, MAJOR, and more.
+Known tokens: TON, USDT, USDC, NOT, STON, DUST, DOGS, CATS, MAJOR, and more.
 Use token symbols or full jetton master addresses.
 """,
     )

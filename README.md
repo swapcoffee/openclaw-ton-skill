@@ -69,7 +69,7 @@ A proof-of-concept for AI-driven open source development. The future is here. �
 - Optimal routing across multiple DEXs
 - Slippage protection
 - Transaction emulation before execution
-- Support for TON, USDT, USDC, NOT, STON, SCALE, and more
+- Support for TON, USDT, USDC, NOT, STON, DUST, and more
 
 ### 📊 Token Analytics
 - Real-time price data and charts
@@ -327,7 +327,7 @@ All test cases can be run from the `scripts/` directory.
 | **TC-005** | Get swap quote | `python swap.py quote --from TON --to USDT --amount 1 --wallet test-wallet` | Quote with rate, fees, route info | ✅ Pass |
 | **TC-006** | Swap emulation | `python swap.py execute --wallet test-wallet --from TON --to USDT --amount 0.5` | Emulation result, fee estimate (no `--confirm`) | ✅ Pass |
 | **TC-007** | Token trust score | `python analytics.py trust --token NOT` | Trust score 0-100 with assessment (HIGH/MED/LOW) | ✅ Pass |
-| **TC-008** | Token full info | `python analytics.py info --token SCALE` | Price, mcap, volume, TVL, holders | ✅ Pass |
+| **TC-008** | Token full info | `python analytics.py info --token DUST` | Price, mcap, volume, TVL, holders | ✅ Pass |
 | **TC-009** | List yield pools | `python yield_cmd.py pools --sort apr --limit 5` | Top 5 pools sorted by APR | ✅ Pass |
 | **TC-010** | Filter pools by protocol | `python yield_cmd.py pools --protocol stonfi --limit 10` | STON.fi pools only | ✅ Pass |
 | **TC-011** | NFT collection search | `python nft.py search --query "TON Diamonds"` | Collection list with addresses | ✅ Pass |

@@ -145,7 +145,7 @@
 **Command:** `python3 swap.py tokens`  
 **Expected:** List of known tokens with addresses  
 **Status:** ✅ Pass  
-**Notes:** Returns TON, USDT, USDC, NOT, STON, SCALE, JETTON
+**Notes:** Returns TON, USDT, USDC, NOT, STON, DUST, JETTON
 
 ---
 

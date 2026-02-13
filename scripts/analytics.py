@@ -409,7 +409,7 @@ def main():
         epilog="""
 Examples:
   # Полная информация о токене
-  %(prog)s info --token SCALE
+  %(prog)s info --token DUST
   
   # Trust score / скам-детекция
   %(prog)s trust --token NOT
@@ -421,7 +421,7 @@ Examples:
   %(prog)s pools --token USDT
   
   # Сравнение токенов
-  %(prog)s compare --tokens "SCALE,NOT,STON"
+  %(prog)s compare --tokens "DUST,NOT,STON"
   
   # Список известных токенов
   %(prog)s tokens

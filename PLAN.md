@@ -195,11 +195,11 @@ transfer.py send-jetton --from UQ... --to UQ... --jetton USDT --amount 100
 
 **CLI:**
 ```bash
-analytics.py info --token SCALE
-analytics.py trust --token SCALE
-analytics.py history --token SCALE --days 7
-analytics.py pools --token SCALE
-analytics.py compare --tokens "SCALE,NOT,STON"
+analytics.py info --token DUST
+analytics.py trust --token DUST
+analytics.py history --token DUST --days 7
+analytics.py pools --token DUST
+analytics.py compare --tokens "DUST,NOT,STON"
 ```
 
 **Критерии готовности:**
