@@ -239,9 +239,13 @@ def _fetch_all_pools(
     return all_pools, total_count
 
 
-def _normalize_pool(pool: dict) -> dict:
+def _normalize_pool(pool: dict, fallback_address: Optional[str] = None) -> dict:
     """
     Нормализует данные пула из v1 API.
+    
+    Поддерживает разные форматы ответа:
+    - Из списка пулов (pools list)
+    - Single pool response (pool details)
     
     Формат v1 API:
     {
@@ -249,52 +253,83 @@ def _normalize_pool(pool: dict) -> dict:
         protocol: str,
         is_trusted: bool,
         tokens: [{
-            address: {blockchain: str, address: str},
+            address: {blockchain: str, address: str} | str,
             metadata: {name, symbol, decimals, listed, verification, image_url}
         }],
         pool_statistics: {...},
         pool: {amm_type: str}  # дополнительная инфа о пуле
     }
+    
+    Args:
+        pool: Данные пула из API
+        fallback_address: Адрес пула для использования если не найден в ответе
     """
     # Основные данные на верхнем уровне
-    address = pool.get("address")
+    address = pool.get("address") or fallback_address
     protocol = pool.get("protocol", "unknown")
     is_trusted = pool.get("is_trusted", False)
     
     # Дополнительная инфа о пуле (если есть)
     pool_extra = pool.get("pool", {})
-    pool_type = pool_extra.get("@type") or pool_extra.get("amm_type") or "dex_pool"
+    if isinstance(pool_extra, dict):
+        pool_type = pool_extra.get("@type") or pool_extra.get("amm_type") or "dex_pool"
+    else:
+        pool_type = "dex_pool"
     
-    # Парсим токены
+    # Парсим токены - поддерживаем разные форматы
     tokens = []
     tokens_raw = pool.get("tokens", [])
     token_symbols = []
     
     for t in tokens_raw:
-        addr_info = t.get("address", {})
+        if not isinstance(t, dict):
+            continue
+            
+        # Адрес токена может быть в разных форматах
+        addr_info = t.get("address")
         metadata = t.get("metadata", {}) or {}
         
-        token_addr = addr_info.get("address") if isinstance(addr_info, dict) else addr_info
-        symbol = metadata.get("symbol", "?")
+        # Обработка разных форматов address
+        token_addr = None
+        if isinstance(addr_info, dict):
+            token_addr = addr_info.get("address")
+        elif isinstance(addr_info, str):
+            token_addr = addr_info
+        elif addr_info is None:
+            # Попробуем найти адрес в других полях
+            token_addr = t.get("token_address") or t.get("jetton_address")
+        
+        # Символ токена
+        symbol = metadata.get("symbol") or t.get("symbol") or "?"
+        
+        # Если нет символа, попробуем извлечь из других полей
+        if symbol == "?":
+            name = metadata.get("name") or t.get("name")
+            if name:
+                symbol = name.upper()[:6]  # Используем имя как fallback
         
         tokens.append({
             "address": token_addr,
             "symbol": symbol,
-            "name": metadata.get("name"),
-            "decimals": metadata.get("decimals", 9),
-            "verification": metadata.get("verification"),
-            "image_url": metadata.get("image_url"),
+            "name": metadata.get("name") or t.get("name"),
+            "decimals": metadata.get("decimals") or t.get("decimals", 9),
+            "verification": metadata.get("verification") or t.get("verification"),
+            "image_url": metadata.get("image_url") or t.get("image_url"),
         })
         token_symbols.append(symbol)
     
-    # Парсим статистику
+    # Парсим статистику - может быть на верхнем уровне или в pool_statistics
     stats = pool.get("pool_statistics", {}) or {}
-    tvl_usd = stats.get("tvl_usd", 0) or 0
-    volume_usd = stats.get("volume_usd", 0) or 0
-    fee_usd = stats.get("fee_usd", 0) or 0
-    apr = stats.get("apr", 0) or 0
-    lp_apr = stats.get("lp_apr", 0) or 0
-    boost_apr = stats.get("boost_apr", 0) or 0
+    if not stats:
+        # Попробуем найти статистику на верхнем уровне
+        stats = {k: v for k, v in pool.items() if k.startswith(("tvl", "volume", "fee", "apr"))}
+    
+    tvl_usd = stats.get("tvl_usd") or stats.get("tvl") or 0
+    volume_usd = stats.get("volume_usd") or stats.get("volume_24h") or stats.get("volume") or 0
+    fee_usd = stats.get("fee_usd") or stats.get("fee") or 0
+    apr = stats.get("apr") or stats.get("apy") or 0
+    lp_apr = stats.get("lp_apr") or 0
+    boost_apr = stats.get("boost_apr") or 0
     
     # Формируем название пары
     pair_name = "/".join(token_symbols) if token_symbols else "Unknown"
@@ -602,7 +637,8 @@ def get_pool_details(pool_address: str) -> dict:
 
     if result["success"]:
         pool = result["data"]
-        normalized = _normalize_pool(pool)
+        # Передаем pool_address как fallback на случай если API не вернул address
+        normalized = _normalize_pool(pool, fallback_address=pool_address)
         
         return {
             "success": True,
