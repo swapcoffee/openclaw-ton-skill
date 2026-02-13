@@ -189,19 +189,42 @@ def get_active_contests() -> dict:
     """
     Get list of active contests.
     
-    GET /v1/contests/active
+    Note: The /v1/contests/active endpoint doesn't exist.
+    This function uses /v1/contests and filters for active ones.
     
     Returns:
         dict with active contests
     """
-    result = swap_coffee_request("/contests/active")
+    # Use /contests endpoint and filter for active ones
+    result = get_all_contests(include_finished=False, page=1, size=100)
     
     if result["success"]:
-        contests = result["data"]
+        contests = result.get("contests", [])
+        # Filter for active contests (status = 'active' or no status field)
+        active_contests = []
+        for contest in contests:
+            if isinstance(contest, dict):
+                status = contest.get("status", "").lower()
+                # Include if status is 'active' or not set (assumed active)
+                if status in ("active", "") or contest.get("is_active", True):
+                    active_contests.append(contest)
+            else:
+                # If contest is not a dict, include it
+                active_contests.append(contest)
+        
         return {
             "success": True,
-            "contests_count": len(contests) if isinstance(contests, list) else 1,
-            "contests": contests,
+            "contests_count": len(active_contests),
+            "contests": active_contests,
+        }
+    
+    # If get_all_contests failed with 404, provide helpful error
+    if result.get("status_code") == 404:
+        return {
+            "success": False,
+            "error": "Contests endpoint not available. This API endpoint may have been removed or changed.",
+            "status_code": 404,
+            "suggestion": "The /v1/contests endpoint may not be available. Check swap.coffee API documentation.",
         }
     
     return {
