@@ -305,13 +305,37 @@ def get_user_position(pool_address: str, wallet_address: str) -> dict:
         }
 
     data = result["data"]
+    
+    # Извлекаем позицию
+    position = data.get("position") or data
+    
+    # Проверяем, действительно ли есть позиция
+    # Позиция должна содержать ненулевой баланс или amount
+    has_position = False
+    if position:
+        # Проверяем различные поля, которые могут содержать баланс
+        balance = position.get("base_token_amount") or position.get("amount") or position.get("balance") or position.get("staked_amount")
+        if balance:
+            # Конвертируем в число и проверяем что не ноль
+            try:
+                balance_num = int(balance) if isinstance(balance, str) else balance
+                if balance_num > 0:
+                    has_position = True
+            except (ValueError, TypeError):
+                pass
+        
+        # Альтернативная проверка: если есть другие поля позиции
+        if not has_position:
+            # Проверяем наличие других признаков позиции
+            if position.get("staked_at") or position.get("unlock_at") or position.get("rewards"):
+                has_position = True
 
     return {
         "success": True,
         "pool_address": pool_address,
         "wallet_address": wallet_address,
-        "has_position": True,
-        "position": data.get("position") or data,
+        "has_position": has_position,
+        "position": position if has_position else None,
         "raw_response": data
     }
 
