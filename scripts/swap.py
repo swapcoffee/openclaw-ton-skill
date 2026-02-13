@@ -345,7 +345,7 @@ def build_swap_transactions(
     output_addr = resolve_token_address(output_token)
 
     input_info = get_token_info(input_addr)
-    input_decimals = input_info.get("decimals", 9)
+    input_decimals = int(input_info.get("decimals", 9))
     input_amount_raw = int(input_amount * (10**input_decimals))
 
     # Сначала получаем маршрут через v1
