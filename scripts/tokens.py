@@ -24,9 +24,8 @@ from datetime import datetime, timezone
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import is_valid_address, normalize_address, tokens_api_request
-from common import (
-    VERIFICATION_LEVELS,
+from utils import tokens_api_request  # noqa: E402
+from common import (  # noqa: E402
     format_price,
     format_large_number,
 )
@@ -263,17 +262,19 @@ def get_account_jettons(wallet_address: str) -> dict:
         raw_balance = item.get("balance", "0")
 
         try:
-            balance_human = int(raw_balance) / (10 ** decimals)
+            balance_human = int(raw_balance) / (10**decimals)
         except (ValueError, TypeError):
             balance_human = 0
 
-        balances.append({
-            "jetton_address": item.get("jetton_address"),
-            "jetton_wallet": item.get("jetton_wallet"),
-            "balance_raw": raw_balance,
-            "balance": balance_human,
-            "jetton": _format_jetton(jetton) if jetton else None,
-        })
+        balances.append(
+            {
+                "jetton_address": item.get("jetton_address"),
+                "jetton_wallet": item.get("jetton_wallet"),
+                "balance_raw": raw_balance,
+                "balance": balance_human,
+                "jetton": _format_jetton(jetton) if jetton else None,
+            }
+        )
 
     return {
         "success": True,
@@ -587,7 +588,9 @@ Sort options: FDMC, TVL, MCAP, VOLUME_24H, PRICE_CHANGE_24H
     )
     list_p.add_argument("--label-id", type=int, help="Filter by label ID")
     list_p.add_argument("--page", type=int, default=1, help="Page number")
-    list_p.add_argument("--size", type=int, default=20, help="Results per page (max 100)")
+    list_p.add_argument(
+        "--size", type=int, default=20, help="Results per page (max 100)"
+    )
 
     # --- info ---
     info_p = subparsers.add_parser("info", help="Get jetton info with market stats")
@@ -611,7 +614,9 @@ Sort options: FDMC, TVL, MCAP, VOLUME_24H, PRICE_CHANGE_24H
     holders_p.add_argument("address", help="Jetton master address")
 
     # --- search ---
-    search_p = subparsers.add_parser("search", help="Hybrid search with memepad support")
+    search_p = subparsers.add_parser(
+        "search", help="Hybrid search with memepad support"
+    )
     search_p.add_argument("--query", "-q", help="Search query")
     search_p.add_argument(
         "--kind",
@@ -620,9 +625,7 @@ Sort options: FDMC, TVL, MCAP, VOLUME_24H, PRICE_CHANGE_24H
         choices=SEARCH_KINDS,
         help="Search kind",
     )
-    search_p.add_argument(
-        "--sort", choices=SORT_OPTIONS, help="Sort by"
-    )
+    search_p.add_argument("--sort", choices=SORT_OPTIONS, help="Sort by")
     search_p.add_argument(
         "--verification",
         "-v",
@@ -638,10 +641,12 @@ Sort options: FDMC, TVL, MCAP, VOLUME_24H, PRICE_CHANGE_24H
     # --- bulk ---
     bulk_p = subparsers.add_parser("bulk", help="Bulk fetch jettons by addresses")
     bulk_p.add_argument("addresses", nargs="+", help="Jetton addresses (up to 100)")
-    bulk_p.add_argument("--no-refresh", action="store_true", help="Don't refresh prices")
+    bulk_p.add_argument(
+        "--no-refresh", action="store_true", help="Don't refresh prices"
+    )
 
     # --- labels ---
-    labels_p = subparsers.add_parser("labels", help="List all labels")
+    subparsers.add_parser("labels", help="List all labels")
 
     args = parser.parse_args()
 
@@ -676,6 +681,7 @@ Sort options: FDMC, TVL, MCAP, VOLUME_24H, PRICE_CHANGE_24H
                 to_time = args.to_time
             else:
                 from datetime import timedelta
+
                 now = datetime.now(timezone.utc)
                 to_time = now.isoformat()
                 from_time = (now - timedelta(hours=args.hours)).isoformat()
@@ -722,11 +728,11 @@ Sort options: FDMC, TVL, MCAP, VOLUME_24H, PRICE_CHANGE_24H
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         if not result.get("success", True):
-            sys.exit(1)
+            return sys.exit(1)
 
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -19,12 +19,10 @@ from typing import Optional
 KNOWN_TOKENS = {
     # Native
     "TON": "native",
-    
     # Stablecoins
     "USDT": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
     "USDC": "EQC61IQRl0_la95t27xhIpjxZt32vl1QQVF2UgTNuvD18W-4",
     "USDD": "EQB6VBdgxH7-xfK4NMcR2T6cS5B5lNB1wvkXLLdvQVBzHN3e",
-    
     # Popular tokens
     "NOT": "EQAvlWFDxGF2lXm67y4yzC17wYKD9A0guwPkMs1gOsM__NOT",
     "STON": "EQA2kCVNwVsil2EM2mB0SkXytxCqQjS4mttjDpnXmwG9T6bO",
@@ -35,24 +33,23 @@ KNOWN_TOKENS = {
     "CATS": "EQDcBkGHmc-gPJl3-UtjW6bNXvb6wj3TEqPrK_h8ffjj1Wr5",
     "MAJOR": "EQCupm9RXC8RM8c2wbWWKJCxF9YqxOaB3z0SxdXH7v-NjKqy",
     "KINGY": "EQC-tdRjjoYMz3MXKW4pj95bNZgvRyWwZ23Jix3ph7guvHxJ",
-    
     # DeFi tokens
     "STONFI": "EQDNhy-nxYFgUqzfUzl3fy4uAPTgG51IkA7-0A-MR9bJSZLt",
     "DEDUST": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
     # Note: Megaton Finance is a DEX, not a token. Removed incorrect placeholder.
     # If MEGA token exists, add correct address here.
-    
     # Wrapped
     "WTON": "EQCajaUU1XXSAjTD-xOV7pE49fGtg4q8kF3ELCOJtGvQFQ2C",
     "JTON": "EQBynBO23ywHy_CgarY9NK9FTz0yDsG82PtcbSTQgGoXwiuA",
-    
     # Meme coins
     "REDO": "EQASLOvJXMUhqKu8yVTJkjnKeOxL3-sJkp8Lb-3iOkf-tYZX",
     "PUNK": "EQA8R2R0JMRXQzYKy_fNFbzgTbJHvzLQZI3k8Fh8dJcSo9BK",
 }
 
 # Reverse mapping (address -> symbol) for quick lookups
-ADDRESS_TO_SYMBOL = {addr: symbol for symbol, addr in KNOWN_TOKENS.items() if addr != "native"}
+ADDRESS_TO_SYMBOL = {
+    addr: symbol for symbol, addr in KNOWN_TOKENS.items() if addr != "native"
+}
 
 
 # =============================================================================
@@ -210,23 +207,23 @@ def truncate_address(address: str, start: int = 6, end: int = 4) -> str:
 def resolve_token_symbol(token: str) -> str:
     """
     Resolve token symbol or address to master contract address.
-    
+
     Args:
         token: Token symbol (e.g., "USDT") or address
-    
+
     Returns:
         Master contract address or "native" for TON
     """
     token_upper = token.upper().strip()
-    
+
     # Check known tokens first
     if token_upper in KNOWN_TOKENS:
         return KNOWN_TOKENS[token_upper]
-    
+
     # If it looks like an address, return as-is
     if ":" in token or len(token) > 40:
         return token
-    
+
     # Unknown symbol - return as-is and let API handle it
     return token
 
@@ -234,10 +231,10 @@ def resolve_token_symbol(token: str) -> str:
 def get_token_symbol(address: str) -> Optional[str]:
     """
     Get token symbol from address if known.
-    
+
     Args:
         address: Token master contract address
-    
+
     Returns:
         Token symbol or None
     """

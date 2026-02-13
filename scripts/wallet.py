@@ -15,17 +15,19 @@ import json
 import argparse
 import getpass
 import time
-import signal
 import multiprocessing as mp
+from multiprocessing.synchronize import Event
+from multiprocessing.sharedctypes import Synchronized
+from multiprocessing.queues import Queue
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
+from typing import Optional, List, Dict, Any
+from datetime import datetime, UTC
 
 # Локальный импорт
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import (
+from utils import (  # noqa: E402
     encrypt_json,
     decrypt_json,
     ensure_skill_dir,
@@ -48,9 +50,9 @@ except ImportError:
 
 # Альтернатива - tonutils
 try:
-    from tonutils.wallet import WalletV4R2
-    from tonutils.utils import Address
-    import nacl.signing
+    from tonutils.wallet import WalletV4R2  # noqa: F401
+    from tonutils.utils import Address  # noqa: F401
+    import nacl.signing  # noqa: F401
 
     TONUTILS_AVAILABLE = True
 except ImportError:
@@ -151,7 +153,7 @@ class WalletStorage:
                 search_raw = normalize_address(identifier, "raw")
                 if wallet_raw == search_raw:
                     return w
-            except:
+            except Exception:
                 pass
 
         return None
@@ -273,7 +275,7 @@ def get_account_info(address: str) -> dict:
             addr = raw_to_friendly(address)
         else:
             addr = _make_url_safe(address)
-    except:
+    except Exception:
         addr = _make_url_safe(address)
 
     result = tonapi_request(f"/accounts/{addr}")
@@ -312,7 +314,7 @@ def get_jetton_balances(address: str) -> dict:
             addr = raw_to_friendly(address)
         else:
             addr = _make_url_safe(address)
-    except:
+    except Exception:
         addr = _make_url_safe(address)
 
     result = tonapi_request(f"/accounts/{addr}/jettons")
@@ -400,14 +402,14 @@ def _vanity_worker(
     pattern: str,
     match_mode: str,
     case_sensitive: bool,
-    result_queue: mp.Queue,
-    counter: mp.Value,
-    stop_event: mp.Event,
+    result_queue: Queue,
+    counter: Synchronized,
+    stop_event: Event,
     version: str = "v4r2",
 ) -> None:
     """
     Worker process for vanity address generation.
-    
+
     Args:
         worker_id: Worker ID for logging
         pattern: Pattern to search for
@@ -425,48 +427,48 @@ def _vanity_worker(
     except ImportError:
         result_queue.put({"error": "tonsdk not available in worker"})
         return
-    
+
     version_map = {
         "v3r2": WalletVersionEnum.v3r2,
         "v4r2": WalletVersionEnum.v4r2,
     }
     wallet_version = version_map.get(version.lower(), WalletVersionEnum.v4r2)
-    
+
     # Prepare pattern for matching
     if not case_sensitive:
         pattern_match = pattern.lower()
     else:
         pattern_match = pattern
-    
+
     while not stop_event.is_set():
         try:
             # Generate random mnemonic
             mnemonic = mnemonic_new(24)
-            
+
             # Create wallet
             _, pub_k, priv_k, wallet = Wallets.from_mnemonics(
                 mnemonic, wallet_version, workchain=0
             )
-            
+
             # Get address (user-friendly format, bounceable)
             # This is the base64url format
             address = wallet.address.to_string(True, True, True)
-            
+
             # Update counter
             with counter.get_lock():
                 counter.value += 1
-            
+
             # Prepare address for matching
             if not case_sensitive:
                 address_match = address.lower()
             else:
                 address_match = address
-            
+
             # Check pattern based on mode
             # Address format: EQ... (starts with EQ for workchain 0)
             # For prefix matching, we skip the "EQ" part
             matched = False
-            
+
             if match_mode == "prefix":
                 # Check if address (after EQ) starts with pattern
                 # Address is like "EQBx..." so we check from position 2
@@ -476,39 +478,43 @@ def _vanity_worker(
                 matched = address_match.endswith(pattern_match)
             elif match_mode == "contains":
                 matched = pattern_match in address_match
-            
+
             if matched:
                 # Found it!
-                result_queue.put({
-                    "success": True,
-                    "mnemonic": mnemonic,
-                    "address": address,
-                    "address_raw": wallet.address.to_string(True, True, False),
-                    "public_key": pub_k.hex(),
-                    "private_key": priv_k.hex(),
-                    "version": version,
-                    "worker_id": worker_id,
-                })
+                result_queue.put(
+                    {
+                        "success": True,
+                        "mnemonic": mnemonic,
+                        "address": address,
+                        "address_raw": wallet.address.to_string(True, True, False),
+                        "public_key": pub_k.hex(),
+                        "private_key": priv_k.hex(),
+                        "version": version,
+                        "worker_id": worker_id,
+                    }
+                )
                 stop_event.set()
                 return
-                
-        except Exception as e:
+
+        except Exception:
             # Log error but continue
             pass
-    
 
-def _estimate_vanity_difficulty(pattern: str, match_mode: str, case_sensitive: bool) -> dict:
+
+def _estimate_vanity_difficulty(
+    pattern: str, match_mode: str, case_sensitive: bool
+) -> dict:
     """
     Estimate difficulty of finding a vanity address.
-    
+
     Base64url alphabet: A-Z, a-z, 0-9, -, _ (64 chars)
     For case-insensitive: effectively ~36 chars (letters collapse)
-    
+
     Returns:
         dict with estimated_attempts, difficulty description
     """
     pattern_len = len(pattern)
-    
+
     if case_sensitive:
         # Full base64url alphabet
         chars = 64
@@ -520,36 +526,36 @@ def _estimate_vanity_difficulty(pattern: str, match_mode: str, case_sensitive: b
         letter_count = sum(1 for c in pattern if c.isalpha())
         chars = 64
         # Effective difficulty is reduced by 2^letters
-        multiplier = 2 ** letter_count
-    
+        # multiplier = 2**letter_count
+
     if match_mode == "prefix":
         # Each position has 1/64 chance
-        base_attempts = chars ** pattern_len
+        base_attempts = chars**pattern_len
     elif match_mode == "suffix":
         # Same as prefix
-        base_attempts = chars ** pattern_len
+        base_attempts = chars**pattern_len
     elif match_mode == "contains":
         # Address is ~48 chars, pattern can appear anywhere
         # Rough estimate: ~45 possible positions
         # So probability ~= 45 / 64^N
         address_len = 48
         positions = address_len - pattern_len + 1
-        base_attempts = (chars ** pattern_len) / max(1, positions)
+        base_attempts = (chars**pattern_len) / max(1, positions)
     else:
-        base_attempts = chars ** pattern_len
-    
+        base_attempts = chars**pattern_len
+
     # Adjust for case-insensitive
     if not case_sensitive:
         letter_count = sum(1 for c in pattern if c.isalpha())
-        base_attempts = base_attempts / (2 ** letter_count)
-    
+        base_attempts = base_attempts / (2**letter_count)
+
     estimated_attempts = int(base_attempts)
-    
+
     # Estimate time based on ~50k attempts/sec/core
     # With 8 cores: ~400k/sec
     attempts_per_sec = 50000 * mp.cpu_count()
     estimated_seconds = estimated_attempts / attempts_per_sec
-    
+
     # Determine difficulty
     if estimated_attempts < 1000:
         difficulty = "trivial"
@@ -561,7 +567,7 @@ def _estimate_vanity_difficulty(pattern: str, match_mode: str, case_sensitive: b
         difficulty = "hard"
     else:
         difficulty = "extreme"
-    
+
     return {
         "pattern_length": pattern_len,
         "estimated_attempts": estimated_attempts,
@@ -593,14 +599,14 @@ def generate_vanity_address(
     pattern: str,
     match_mode: str = "contains",
     case_sensitive: bool = False,
-    threads: int = None,
+    threads: int | None = None,
     timeout: int = 3600,
     version: str = "v4r2",
     progress_callback=None,
 ) -> dict:
     """
     Generate a vanity TON wallet address.
-    
+
     Args:
         pattern: Pattern to search for in the address
         match_mode: 'prefix', 'contains', or 'suffix'
@@ -609,54 +615,62 @@ def generate_vanity_address(
         timeout: Maximum seconds to search
         version: Wallet version (v3r2, v4r2)
         progress_callback: Optional callback(attempts, elapsed, rate) for progress
-    
+
     Returns:
         dict with wallet data or error
     """
     if threads is None:
         threads = mp.cpu_count()
-    
+
     # Validate pattern
-    valid_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    valid_chars = set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    )
     if not all(c in valid_chars for c in pattern):
         return {
             "success": False,
-            "error": f"Invalid pattern. Use only base64url characters: A-Za-z0-9-_"
+            "error": "Invalid pattern. Use only base64url characters: A-Za-z0-9-_",
         }
-    
+
     if len(pattern) > 20:
-        return {
-            "success": False,
-            "error": "Pattern too long. Maximum 20 characters."
-        }
-    
+        return {"success": False, "error": "Pattern too long. Maximum 20 characters."}
+
     # Estimate difficulty
-    estimate = _estimate_vanity_difficulty(pattern, match_mode, case_sensitive)
-    
+    # estimate = _estimate_vanity_difficulty(pattern, match_mode, case_sensitive)
+
     # Create shared objects
     result_queue = mp.Queue()
-    counter = mp.Value('i', 0)
+    counter = mp.Value("i", 0)
     stop_event = mp.Event()
-    
+
     # Start workers
     workers = []
     for i in range(threads):
         p = mp.Process(
             target=_vanity_worker,
-            args=(i, pattern, match_mode, case_sensitive, result_queue, counter, stop_event, version)
+            args=(
+                i,
+                pattern,
+                match_mode,
+                case_sensitive,
+                result_queue,
+                counter,
+                stop_event,
+                version,
+            ),
         )
         p.start()
         workers.append(p)
-    
+
     # Monitor progress
     start_time = time.time()
     last_count = 0
     last_time = start_time
-    
+
     try:
         while True:
             elapsed = time.time() - start_time
-            
+
             # Check timeout
             if elapsed >= timeout:
                 stop_event.set()
@@ -671,28 +685,28 @@ def generate_vanity_address(
                     "attempts": counter.value,
                     "elapsed_seconds": elapsed,
                 }
-            
+
             # Check if found
             try:
                 result = result_queue.get_nowait()
                 if result.get("error"):
                     return {"success": False, "error": result["error"]}
-                
+
                 # Stop all workers
                 stop_event.set()
                 for p in workers:
                     p.join(timeout=1)
                     if p.is_alive():
                         p.terminate()
-                
+
                 result["attempts"] = counter.value
                 result["elapsed_seconds"] = elapsed
                 result["rate"] = counter.value / max(0.1, elapsed)
                 return result
-                
-            except:
+
+            except Exception:
                 pass
-            
+
             # Progress update
             if progress_callback and time.time() - last_time >= 1.0:
                 current_count = counter.value
@@ -701,9 +715,9 @@ def generate_vanity_address(
                 progress_callback(current_count, elapsed, rate)
                 last_count = current_count
                 last_time = current_time
-            
+
             time.sleep(0.1)
-            
+
     except KeyboardInterrupt:
         stop_event.set()
         for p in workers:
@@ -736,7 +750,7 @@ def cmd_create(args, password: str) -> dict:
     # Добавляем метаданные
     wallet_data["mnemonic"] = mnemonic
     wallet_data["label"] = args.label or f"wallet_{len(storage.get_wallets()) + 1}"
-    wallet_data["created_at"] = datetime.utcnow().isoformat()
+    wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
     # Сохраняем
     storage.add_wallet(wallet_data)
@@ -777,7 +791,7 @@ def cmd_import(args, password: str) -> dict:
     # Добавляем метаданные
     wallet_data["mnemonic"] = mnemonic
     wallet_data["label"] = args.label or f"imported_{len(storage.get_wallets()) + 1}"
-    wallet_data["created_at"] = datetime.utcnow().isoformat()
+    wallet_data["created_at"] = datetime.now(UTC).isoformat()
     wallet_data["imported"] = True
 
     # Сохраняем
@@ -905,9 +919,9 @@ def cmd_export(args, password: str) -> dict:
 def cmd_create_vanity(args, password: str) -> dict:
     """Creates a vanity wallet address with a custom pattern."""
     import sys
-    
+
     storage = WalletStorage(password)
-    
+
     # Determine match mode and pattern
     if args.prefix:
         pattern = args.prefix
@@ -921,49 +935,68 @@ def cmd_create_vanity(args, password: str) -> dict:
     else:
         return {
             "success": False,
-            "error": "Specify --prefix, --suffix, or --contains pattern"
+            "error": "Specify --prefix, --suffix, or --contains pattern",
         }
-    
+
     # Validate pattern
-    valid_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    valid_chars = set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    )
     if not all(c in valid_chars for c in pattern):
         return {
             "success": False,
-            "error": f"Invalid pattern. Use only base64url characters: A-Za-z0-9-_"
+            "error": "Invalid pattern. Use only base64url characters: A-Za-z0-9-_",
         }
-    
+
     # Estimate difficulty first
     estimate = _estimate_vanity_difficulty(pattern, match_mode, args.case_sensitive)
-    
+
     # Show estimate
-    print(json.dumps({
-        "action": "estimate",
-        "pattern": pattern,
-        "match_mode": match_mode,
-        "case_sensitive": args.case_sensitive,
-        "difficulty": estimate["difficulty"],
-        "estimated_attempts": estimate["estimated_attempts"],
-        "estimated_time": estimate["estimated_time_human"],
-        "threads": args.threads or mp.cpu_count(),
-        "timeout_seconds": args.timeout,
-    }, indent=2), file=sys.stderr)
-    
+    print(
+        json.dumps(
+            {
+                "action": "estimate",
+                "pattern": pattern,
+                "match_mode": match_mode,
+                "case_sensitive": args.case_sensitive,
+                "difficulty": estimate["difficulty"],
+                "estimated_attempts": estimate["estimated_attempts"],
+                "estimated_time": estimate["estimated_time_human"],
+                "threads": args.threads or mp.cpu_count(),
+                "timeout_seconds": args.timeout,
+            },
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+
     # Warn if very difficult
     if estimate["warning"]:
-        print(f"\n⚠️  WARNING: Expected search time > 1 hour ({estimate['estimated_time_human']})", file=sys.stderr)
-        print("    Consider a shorter pattern or use --timeout to limit search time.\n", file=sys.stderr)
-    
+        print(
+            f"\n⚠️  WARNING: Expected search time > 1 hour ({estimate['estimated_time_human']})",
+            file=sys.stderr,
+        )
+        print(
+            "    Consider a shorter pattern or use --timeout to limit search time.\n",
+            file=sys.stderr,
+        )
+
     # Progress callback
     last_update = [0]
+
     def progress(attempts, elapsed, rate):
         if time.time() - last_update[0] >= 2.0:  # Update every 2 seconds
             eta = (estimate["estimated_attempts"] - attempts) / max(1, rate)
-            print(f"\r🔍 Attempts: {attempts:,} | Rate: {rate:,.0f}/s | Elapsed: {_format_duration(elapsed)} | ETA: {_format_duration(eta)}   ", 
-                  end="", file=sys.stderr, flush=True)
+            print(
+                f"\r🔍 Attempts: {attempts:,} | Rate: {rate:,.0f}/s | Elapsed: {_format_duration(elapsed)} | ETA: {_format_duration(eta)}   ",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
             last_update[0] = time.time()
-    
-    print(f"\n🔍 Searching for vanity address...\n", file=sys.stderr)
-    
+
+    print("\n🔍 Searching for vanity address...\n", file=sys.stderr)
+
     # Generate vanity address
     result = generate_vanity_address(
         pattern=pattern,
@@ -974,12 +1007,12 @@ def cmd_create_vanity(args, password: str) -> dict:
         version=args.version,
         progress_callback=progress,
     )
-    
+
     print("\n", file=sys.stderr)  # New line after progress
-    
+
     if not result.get("success"):
         return result
-    
+
     # Found! Save the wallet
     wallet_data = {
         "address": result["address"],
@@ -989,16 +1022,16 @@ def cmd_create_vanity(args, password: str) -> dict:
         "mnemonic": result["mnemonic"],
         "version": result["version"],
         "label": args.label or f"vanity_{pattern[:8]}",
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "vanity": {
             "pattern": pattern,
             "match_mode": match_mode,
             "case_sensitive": args.case_sensitive,
             "attempts": result["attempts"],
             "elapsed_seconds": result["elapsed_seconds"],
-        }
+        },
     }
-    
+
     try:
         storage.add_wallet(wallet_data)
     except ValueError as e:
@@ -1009,7 +1042,7 @@ def cmd_create_vanity(args, password: str) -> dict:
             "address": result["address"],
             "mnemonic": result["mnemonic"],
         }
-    
+
     return {
         "success": True,
         "action": "created_vanity",
@@ -1175,7 +1208,7 @@ Note: Base64url alphabet only (A-Za-z0-9-_). Longer patterns = much longer searc
                 indent=2,
             )
         )
-        sys.exit(1)
+        return sys.exit(1)
 
     # Получаем пароль
     password = args.password or os.environ.get("WALLET_PASSWORD")
@@ -1192,7 +1225,7 @@ Note: Base64url alphabet only (A-Za-z0-9-_). Longer patterns = much longer searc
                     }
                 )
             )
-            sys.exit(1)
+            return sys.exit(1)
 
     # Выполняем команду
     try:
@@ -1212,10 +1245,10 @@ Note: Base64url alphabet only (A-Za-z0-9-_). Longer patterns = much longer searc
 
     except ValueError as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
     except Exception as e:
         print(json.dumps({"error": f"Unexpected error: {e}"}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -21,20 +21,21 @@ from typing import Optional
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import tonapi_request, normalize_address, raw_to_friendly
-from dns import resolve_address
-from wallet import WalletStorage, get_jetton_balances
+from utils import tonapi_request, normalize_address, raw_to_friendly  # noqa: E402
+from dns import resolve_address  # noqa: E402
+from wallet import WalletStorage, get_jetton_balances  # noqa: E402
 
 
 def _make_url_safe(address: str) -> str:
     """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
     return address.replace("+", "-").replace("/", "_")
 
+
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum
-    from tonsdk.utils import to_nano, from_nano, bytes_to_b64str, b64str_to_bytes
-    from tonsdk.boc import Cell
+    from tonsdk.utils import to_nano, from_nano, bytes_to_b64str, b64str_to_bytes  # noqa: F401
+    from tonsdk.boc import Cell  # noqa: F401
 
     TONSDK_AVAILABLE = True
 except ImportError:
@@ -95,23 +96,23 @@ def create_wallet_instance(wallet_data: dict):
 def get_account_status(address: str) -> str:
     """
     Получает статус аккаунта (active, uninit, nonexist).
-    
+
     Args:
         address: Адрес аккаунта
-        
+
     Returns:
         Статус: "active", "uninit", "nonexist", или "unknown"
     """
     addr = _make_url_safe(address)
     result = tonapi_request(f"/accounts/{addr}")
-    
+
     if result["success"]:
         return result["data"].get("status", "unknown")
-    
+
     # Если ошибка 404 - аккаунт не существует
     if result.get("status_code") == 404:
         return "nonexist"
-    
+
     return "unknown"
 
 
@@ -138,7 +139,7 @@ def build_ton_transfer(
         bytes BOC (подписанная транзакция)
     """
     from tonsdk.utils import Address
-    
+
     # Создаём payload с комментарием если есть
     payload = None
     if comment:
@@ -152,7 +153,7 @@ def build_ton_transfer(
     # Конвертируем адрес с правильным bounce флагом
     # Для неинициализированных кошельков bounce должен быть False
     recipient_addr = Address(to_address)
-    
+
     # Если bounce=False, конвертируем в non-bounceable формат
     if not bounce:
         # Получаем raw адрес и конвертируем в non-bounceable friendly
@@ -268,7 +269,7 @@ def get_jetton_wallet_address(owner_address: str, jetton_master: str) -> Optiona
     try:
         owner = normalize_address(owner_address, "friendly")
         master = normalize_address(jetton_master, "friendly")
-    except:
+    except Exception:
         owner = owner_address
         master = jetton_master
 
@@ -426,8 +427,9 @@ def transfer_ton(
     from_wallet: str,
     to_address: str,
     amount_ton: float,
+    *,
+    password: str,
     comment: Optional[str] = None,
-    password: str = None,
     confirm: bool = False,
 ) -> dict:
     """
@@ -536,8 +538,9 @@ def transfer_jetton(
     to_address: str,
     jetton: str,
     amount: float,
+    *,
+    password: str,
     comment: Optional[str] = None,
-    password: str = None,
     confirm: bool = False,
 ) -> dict:
     """
@@ -608,7 +611,7 @@ def transfer_jetton(
             ) == normalize_address(jetton, "raw"):
                 target_jetton = j
                 break
-        except:
+        except Exception:
             pass
 
     if not target_jetton:
@@ -788,7 +791,7 @@ Examples:
                 indent=2,
             )
         )
-        sys.exit(1)
+        return sys.exit(1)
 
     # Получаем пароль
     password = args.password or os.environ.get("WALLET_PASSWORD")
@@ -803,7 +806,7 @@ Examples:
                     }
                 )
             )
-            sys.exit(1)
+            return sys.exit(1)
 
     try:
         if args.command == "ton":
@@ -834,14 +837,14 @@ Examples:
 
         # Exit code based on success
         if not result.get("success", False):
-            sys.exit(1)
+            return sys.exit(1)
 
     except ValueError as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
     except Exception as e:
         print(json.dumps({"error": f"Unexpected error: {e}"}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

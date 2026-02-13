@@ -27,20 +27,21 @@ from typing import Optional
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import tonapi_request, api_request, normalize_address, load_config
-from dns import resolve_address, is_ton_domain
-from wallet import WalletStorage
+from utils import tonapi_request, api_request, normalize_address, load_config  # noqa: E402
+from dns import resolve_address, is_ton_domain  # noqa: E402
+from wallet import WalletStorage  # noqa: E402
 
 
 def _make_url_safe(address: str) -> str:
     """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
     return address.replace("+", "-").replace("/", "_")
 
+
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum
-    from tonsdk.utils import to_nano, from_nano
-    from tonsdk.boc import Cell
+    from tonsdk.utils import to_nano, from_nano  # noqa: F401
+    from tonsdk.boc import Cell  # noqa: F401
 
     TONSDK_AVAILABLE = True
 except ImportError:
@@ -183,7 +184,7 @@ def resolve_wallet_address(
             wallet_data = storage.get_wallet(wallet_identifier, include_secrets=False)
             if wallet_data:
                 return wallet_data["address"]
-        except:
+        except Exception:
             pass
 
     return None
@@ -232,7 +233,7 @@ def list_nfts(
     # Нормализуем адрес для API
     try:
         api_address = normalize_address(address, "friendly")
-    except:
+    except Exception:
         api_address = address
 
     # Запрос к TonAPI
@@ -319,7 +320,7 @@ def get_nft_info(nft_address: str) -> dict:
     """
     try:
         api_address = _make_url_safe(normalize_address(nft_address, "friendly"))
-    except:
+    except Exception:
         api_address = _make_url_safe(nft_address)
 
     # Запрос к Marketapp (может вернуть ошибку если ключ не настроен)
@@ -458,7 +459,7 @@ def get_collection_info(
     """
     try:
         api_address = _make_url_safe(normalize_address(collection_address, "friendly"))
-    except:
+    except Exception:
         api_address = _make_url_safe(collection_address)
 
     # TonAPI для метаданных (всегда пробуем)
@@ -560,10 +561,10 @@ def get_collection_info(
 def resolve_collection_alias(collection: str) -> str:
     """
     Resolve collection alias to address.
-    
+
     Args:
         collection: Alias (e.g. 'anon', 'usernames') or address
-    
+
     Returns:
         Collection address
     """
@@ -571,7 +572,7 @@ def resolve_collection_alias(collection: str) -> str:
     alias_lower = collection.lower().strip()
     if alias_lower in COLLECTION_ALIASES:
         return COLLECTION_ALIASES[alias_lower]
-    
+
     # Return as-is (assume it's an address)
     return collection
 
@@ -579,41 +580,43 @@ def resolve_collection_alias(collection: str) -> str:
 def get_collection_floor(collection: str) -> dict:
     """
     Get floor price for a collection.
-    
+
     Args:
         collection: Collection alias or address
-    
+
     Returns:
         dict with floor price info
     """
     # Resolve alias
     collection_address = resolve_collection_alias(collection)
-    
+
     try:
         api_address = _make_url_safe(normalize_address(collection_address, "friendly"))
-    except:
+    except Exception:
         api_address = _make_url_safe(collection_address)
-    
+
     # Method 1: Try to get from /collections/ list (has floor in extra_data)
     collections_result = marketapp_request("/collections/")
-    
+
     collection_data = None
     if collections_result["success"]:
         for coll in collections_result["data"]:
             if coll.get("address") == api_address:
                 collection_data = coll
                 break
-    
+
     if collection_data:
         extra = collection_data.get("extra_data", {})
         floor_nano = int(extra.get("floor", 0))
-        
+
         return {
             "success": True,
             "collection": {
                 "address": api_address,
                 "name": collection_data.get("name"),
-                "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+                "alias": collection.lower()
+                if collection.lower() in COLLECTION_ALIASES
+                else None,
             },
             "floor_price_nano": floor_nano,
             "floor_price_ton": floor_nano / 1e9 if floor_nano else None,
@@ -621,42 +624,50 @@ def get_collection_floor(collection: str) -> dict:
                 "items_count": extra.get("items"),
                 "on_sale": extra.get("on_sale_all"),
                 "owners": extra.get("owners"),
-                "volume_7d_ton": int(extra.get("volume7d", 0)) / 1e9 if extra.get("volume7d") else None,
-                "volume_30d_ton": int(extra.get("volume30d", 0)) / 1e9 if extra.get("volume30d") else None,
+                "volume_7d_ton": int(extra.get("volume7d", 0)) / 1e9
+                if extra.get("volume7d")
+                else None,
+                "volume_30d_ton": int(extra.get("volume30d", 0)) / 1e9
+                if extra.get("volume30d")
+                else None,
             },
             "source": "marketapp_collections",
         }
-    
+
     # Method 2: Fallback - get cheapest NFT on sale from the collection
     nfts_result = marketapp_request(
         f"/nfts/collections/{api_address}/",
         params={"filter_by": "onsale", "limit": 100},
     )
-    
+
     if nfts_result["success"]:
         items = nfts_result["data"].get("items", [])
-        
+
         if not items:
             # Try TonAPI for collection name at least
             tonapi_result = tonapi_request(f"/nfts/collections/{api_address}")
             collection_name = None
             if tonapi_result["success"]:
                 metadata = tonapi_result["data"].get("metadata", {})
-                collection_name = metadata.get("name") or tonapi_result["data"].get("name")
-            
+                collection_name = metadata.get("name") or tonapi_result["data"].get(
+                    "name"
+                )
+
             return {
                 "success": True,
                 "collection": {
                     "address": api_address,
                     "name": collection_name,
-                    "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+                    "alias": collection.lower()
+                    if collection.lower() in COLLECTION_ALIASES
+                    else None,
                 },
                 "floor_price_nano": None,
                 "floor_price_ton": None,
                 "message": "No NFTs on sale in this collection",
                 "source": "marketapp_nfts",
             }
-        
+
         # Find minimum price
         min_price = float("inf")
         min_nft = None
@@ -665,14 +676,16 @@ def get_collection_floor(collection: str) -> dict:
             if price > 0 and price < min_price:
                 min_price = price
                 min_nft = item
-        
+
         if min_nft:
             return {
                 "success": True,
                 "collection": {
                     "address": api_address,
                     "name": min_nft.get("collection_name"),
-                    "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+                    "alias": collection.lower()
+                    if collection.lower() in COLLECTION_ALIASES
+                    else None,
                 },
                 "floor_price_nano": min_price,
                 "floor_price_ton": min_price / 1e9,
@@ -684,20 +697,22 @@ def get_collection_floor(collection: str) -> dict:
                 "on_sale_count": len(items),
                 "source": "marketapp_nfts",
             }
-    
+
     # Method 3: TonAPI fallback for basic info
     tonapi_result = tonapi_request(f"/nfts/collections/{api_address}")
-    
+
     if tonapi_result["success"]:
         ton_data = tonapi_result["data"]
         metadata = ton_data.get("metadata", {})
-        
+
         return {
             "success": True,
             "collection": {
                 "address": api_address,
                 "name": metadata.get("name") or ton_data.get("name"),
-                "alias": collection.lower() if collection.lower() in COLLECTION_ALIASES else None,
+                "alias": collection.lower()
+                if collection.lower() in COLLECTION_ALIASES
+                else None,
             },
             "floor_price_nano": None,
             "floor_price_ton": None,
@@ -705,7 +720,7 @@ def get_collection_floor(collection: str) -> dict:
             "items_count": ton_data.get("next_item_index", 0),
             "source": "tonapi",
         }
-    
+
     return {
         "success": False,
         "error": f"Collection not found: {collection}",
@@ -930,7 +945,7 @@ def build_and_send_marketapp_tx(
     to_addr = msg.get("address")
     amount = int(msg.get("amount", 0))
     payload_b64 = msg.get("payload")
-    state_init_b64 = msg.get("stateInit")
+    # state_init_b64 = msg.get("stateInit")
 
     if not to_addr:
         return {"success": False, "error": "Transaction message has no address"}
@@ -1002,7 +1017,7 @@ def buy_nft(
 
     try:
         nft_addr_friendly = normalize_address(nft_address, "friendly")
-    except:
+    except Exception:
         nft_addr_friendly = nft_address
 
     # Запрос к Marketapp для получения транзакции
@@ -1105,7 +1120,7 @@ def sell_nft(
             if nft_info.get("owner")
             else None
         )
-    except:
+    except Exception:
         owner_raw = owner_address
         nft_owner_raw = nft_info.get("owner")
 
@@ -1118,7 +1133,7 @@ def sell_nft(
     try:
         nft_addr_friendly = normalize_address(nft_address, "friendly")
         owner_addr_friendly = normalize_address(owner_address, "friendly")
-    except:
+    except Exception:
         nft_addr_friendly = nft_address
         owner_addr_friendly = owner_address
 
@@ -1215,7 +1230,7 @@ def cancel_sale(
     try:
         nft_addr_friendly = normalize_address(nft_address, "friendly")
         owner_addr_friendly = normalize_address(owner_address, "friendly")
-    except:
+    except Exception:
         nft_addr_friendly = nft_address
         owner_addr_friendly = owner_address
 
@@ -1314,7 +1329,7 @@ def change_price(
     try:
         nft_addr_friendly = normalize_address(nft_address, "friendly")
         owner_addr_friendly = normalize_address(owner_address, "friendly")
-    except:
+    except Exception:
         nft_addr_friendly = nft_address
         owner_addr_friendly = owner_address
 
@@ -1503,7 +1518,7 @@ def transfer_nft(
     try:
         sender_raw = normalize_address(sender_address, "raw")
         owner_raw = normalize_address(nft_owner, "raw") if nft_owner else None
-    except:
+    except Exception:
         sender_raw = sender_address
         owner_raw = nft_owner
 
@@ -1515,7 +1530,7 @@ def transfer_nft(
 
     try:
         nft_addr_friendly = normalize_address(nft_address, "friendly")
-    except:
+    except Exception:
         nft_addr_friendly = nft_address
 
     seqno = get_seqno(sender_address)
@@ -1657,8 +1672,10 @@ Examples:
     # --- floor ---
     floor_p = subparsers.add_parser("floor", help="Get collection floor price")
     floor_p.add_argument(
-        "--collection", "-c", required=True,
-        help="Collection address or alias (anon, usernames, etc.)"
+        "--collection",
+        "-c",
+        required=True,
+        help="Collection address or alias (anon, usernames, etc.)",
     )
 
     # --- gifts ---
@@ -1741,7 +1758,7 @@ Examples:
                         }
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
     try:
         if args.command == "list":
@@ -1784,11 +1801,11 @@ Examples:
                         indent=2,
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
             if not password:
                 print(json.dumps({"error": "Password required for buy"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             result = buy_nft(
                 nft_address=args.nft,
@@ -1808,11 +1825,11 @@ Examples:
                         indent=2,
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
             if not password:
                 print(json.dumps({"error": "Password required for sell"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             result = sell_nft(
                 nft_address=args.nft,
@@ -1833,11 +1850,11 @@ Examples:
                         indent=2,
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
             if not password:
                 print(json.dumps({"error": "Password required for cancel-sale"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             result = cancel_sale(
                 nft_address=args.nft,
@@ -1857,11 +1874,11 @@ Examples:
                         indent=2,
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
             if not password:
                 print(json.dumps({"error": "Password required for change-price"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             result = change_price(
                 nft_address=args.nft,
@@ -1882,11 +1899,11 @@ Examples:
                         indent=2,
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
             if not password:
                 print(json.dumps({"error": "Password required for transfer"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             result = transfer_nft(
                 nft_address=args.nft,
@@ -1902,14 +1919,14 @@ Examples:
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         if not result.get("success", False):
-            sys.exit(1)
+            return sys.exit(1)
 
     except ValueError as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
     except Exception as e:
         print(json.dumps({"error": f"Unexpected error: {e}"}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -23,19 +23,20 @@ from typing import Optional
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import api_request, tonapi_request, load_config, is_valid_address
-from wallet import WalletStorage
-from tokens import resolve_token_by_symbol, get_token_market_data
+from utils import api_request, tonapi_request, load_config, is_valid_address  # noqa: E402
+from wallet import WalletStorage  # noqa: E402
+from tokens import resolve_token_by_symbol  # noqa: E402
 
 
 def _make_url_safe(address: str) -> str:
     """Конвертирует адрес в URL-safe формат (заменяет +/ на -_)."""
     return address.replace("+", "-").replace("/", "_")
 
+
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum
-    from tonsdk.utils import to_nano, from_nano
+    from tonsdk.utils import to_nano, from_nano  # noqa: F401
     from tonsdk.boc import Cell
 
     TONSDK_AVAILABLE = True
@@ -50,6 +51,9 @@ except ImportError:
 SWAP_COFFEE_API = "https://backend.swap.coffee"
 SWAP_COFFEE_API_V1 = "https://backend.swap.coffee/v1"
 SWAP_COFFEE_API_V2 = "https://backend.swap.coffee/v2"
+
+# Transaction status polling
+TX_STATUS_POLL_INTERVAL = 5  # seconds between polls
 
 # Известные токены (symbol -> master address)
 KNOWN_TOKENS = {
@@ -100,7 +104,7 @@ def swap_coffee_request(
         base_url = SWAP_COFFEE_API_V1
     else:
         base_url = SWAP_COFFEE_API
-    
+
     api_key = get_swap_coffee_key()
 
     headers = {"Content-Type": "application/json"}
@@ -237,7 +241,9 @@ def get_swap_quote(
         "max_length": 4,  # До 2 промежуточных токенов
     }
 
-    result = swap_coffee_request("/route", method="POST", json_data=request_body, version="v1")
+    result = swap_coffee_request(
+        "/route", method="POST", json_data=request_body, version="v1"
+    )
 
     if not result["success"]:
         return {
@@ -256,14 +262,14 @@ def get_swap_quote(
     output_usd = float(data.get("output_usd", 0))
     price_impact = data.get("price_impact", 0)
     recommended_gas = data.get("recommended_gas", 0.15)
-    
+
     # Конвертируем в raw для совместимости
-    input_amount_raw = int(input_amount * (10 ** input_decimals))
-    output_amount_raw = int(output_amount * (10 ** output_decimals))
-    
+    input_amount_raw = int(input_amount * (10**input_decimals))
+    output_amount_raw = int(output_amount * (10**output_decimals))
+
     # Минимальный выход с учётом slippage
     min_output = output_amount * (1 - slippage / 100)
-    min_output_raw = int(min_output * (10 ** output_decimals))
+    min_output_raw = int(min_output * (10**output_decimals))
 
     # Вычисляем эффективную цену
     if input_amount > 0:
@@ -280,7 +286,9 @@ def get_swap_quote(
                 "dex": path.get("dex", "unknown"),
                 "pool": path.get("pool_address"),
                 "input": path.get("input_token", {}).get("address", {}).get("address"),
-                "output": path.get("output_token", {}).get("address", {}).get("address"),
+                "output": path.get("output_token", {})
+                .get("address", {})
+                .get("address"),
                 "input_amount": path.get("swap", {}).get("input_amount"),
                 "output_amount": path.get("swap", {}).get("output_amount"),
             }
@@ -289,14 +297,14 @@ def get_swap_quote(
     return {
         "success": True,
         "input_token": {
-            "symbol": _normalize_symbol(input_info.get("symbol")),
+            "symbol": _normalize_symbol(input_info["symbol"]),
             "address": input_addr,
             "amount": input_amount,
             "amount_raw": input_amount_raw,
             "usd": input_usd,
         },
         "output_token": {
-            "symbol": _normalize_symbol(output_info.get("symbol")),
+            "symbol": _normalize_symbol(output_info["symbol"]),
             "address": output_addr,
             "amount": output_amount,
             "amount_raw": output_amount_raw,
@@ -344,9 +352,9 @@ def build_swap_transactions(
     input_addr = resolve_token_address(input_token)
     output_addr = resolve_token_address(output_token)
 
-    input_info = get_token_info(input_addr)
-    input_decimals = int(input_info.get("decimals", 9))
-    input_amount_raw = int(input_amount * (10**input_decimals))
+    # input_info = get_token_info(input_addr)
+    # input_decimals = int(input_info.get("decimals", 9))
+    # input_amount_raw = int(input_amount * (10**input_decimals))
 
     # Сначала получаем маршрут через v1
     route_result = swap_coffee_request(
@@ -362,7 +370,10 @@ def build_swap_transactions(
     )
 
     if not route_result["success"]:
-        return {"success": False, "error": route_result.get("error", "Failed to get route")}
+        return {
+            "success": False,
+            "error": route_result.get("error", "Failed to get route"),
+        }
 
     # Запрос на построение транзакций через v2
     result = swap_coffee_request(
@@ -431,12 +442,12 @@ def create_wallet_instance(wallet_data: dict):
 def get_seqno(address: str) -> int:
     """Получает seqno кошелька."""
     addr_safe = _make_url_safe(address)
-    
+
     # Пробуем /v2/wallet/{address}/seqno
     result = tonapi_request(f"/wallet/{addr_safe}/seqno")
     if result["success"]:
         return result["data"].get("seqno", 0)
-    
+
     # Fallback: через get method
     result = tonapi_request(f"/blockchain/accounts/{addr_safe}/methods/seqno")
     if result["success"]:
@@ -452,7 +463,7 @@ def get_seqno(address: str) -> int:
             first = stack[0]
             if isinstance(first, dict) and first.get("type") == "num":
                 return int(first.get("num", "0"), 16)
-    
+
     return 0
 
 
@@ -496,7 +507,8 @@ def execute_swap(
     output_token: str,
     input_amount: float,
     slippage: float = 0.5,
-    password: str = None,
+    *,
+    password: str,
     confirm: bool = False,
     referral_address: Optional[str] = None,
     referral_fee_percent: float = 0.0,
@@ -577,7 +589,7 @@ def execute_swap(
     # - send_mode: режим отправки (обычно 3)
     #
     # Нужно создать transfer message от нашего кошелька на address с value TON и cell как payload body
-    
+
     wallet = create_wallet_instance(wallet_data)
     seqno = get_seqno(sender_address)
 
@@ -591,10 +603,10 @@ def execute_swap(
         amount = int(amount_str)
         cell_b64 = tx.get("cell")  # Готовый BOC payload (base64)
         send_mode = tx.get("send_mode", 3)
-        
+
         if not to_addr:
             return {"success": False, "error": f"Transaction {i} has no address"}
-        
+
         # Декодируем cell из base64 в Cell объект
         payload = None
         if cell_b64:
@@ -602,7 +614,10 @@ def execute_swap(
                 cell_bytes = base64.b64decode(cell_b64)
                 payload = Cell.one_from_boc(cell_bytes)
             except Exception as e:
-                return {"success": False, "error": f"Failed to decode cell for tx {i}: {e}"}
+                return {
+                    "success": False,
+                    "error": f"Failed to decode cell for tx {i}: {e}",
+                }
 
         # Создаём transfer message
         # to_addr может быть в raw format "0:abc...", tonsdk работает с этим
@@ -615,7 +630,10 @@ def execute_swap(
                 send_mode=send_mode,
             )
         except Exception as e:
-            return {"success": False, "error": f"Failed to create transfer for tx {i}: {e}"}
+            return {
+                "success": False,
+                "error": f"Failed to create transfer for tx {i}: {e}",
+            }
 
         boc = query["message"].to_boc(False)
         boc_b64 = base64.b64encode(boc).decode("ascii")
@@ -690,9 +708,13 @@ def execute_swap(
                 result["completion"] = completion_result
 
                 if completion_result.get("success"):
-                    result["message"] = f"Swap completed! {completion_result['completed']}/{completion_result['total']} transactions confirmed"
+                    result["message"] = (
+                        f"Swap completed! {completion_result['completed']}/{completion_result['total']} transactions confirmed"
+                    )
                 else:
-                    result["message"] = f"Swap sent but verification incomplete: {completion_result.get('failed', 0)} failed, {completion_result.get('timed_out', 0)} timed out"
+                    result["message"] = (
+                        f"Swap sent but verification incomplete: {completion_result.get('failed', 0)} failed, {completion_result.get('timed_out', 0)} timed out"
+                    )
 
         elif sent_count > 0:
             result["success"] = True
@@ -750,6 +772,115 @@ def get_swap_status(tx_hash: str) -> dict:
         }
 
     return {"success": False, "error": "Transaction not found"}
+
+
+def poll_transaction_status(
+    tx_hash: str,
+    max_polls: int = 12,
+    poll_interval: int = 5,
+) -> dict:
+    """
+    Опрашивает статус транзакции до завершения или достижения max_polls.
+
+    Args:
+        tx_hash: Хэш транзакции
+        max_polls: Максимальное количество опросов
+        poll_interval: Интервал между опросами в секундах
+
+    Returns:
+        dict со статусом
+    """
+    import time
+
+    for poll_num in range(max_polls):
+        status = get_swap_status(tx_hash)
+
+        if status.get("success"):
+            # Check if transaction is completed
+            tx_status = status.get("status", {})
+            if isinstance(tx_status, dict):
+                state = tx_status.get("state")
+                if state in ("completed", "finalized", "success"):
+                    return {
+                        "success": True,
+                        "completed": True,
+                        "poll_num": poll_num + 1,
+                        "status": status,
+                    }
+            elif isinstance(tx_status, str):
+                if tx_status in ("completed", "finalized", "success"):
+                    return {
+                        "success": True,
+                        "completed": True,
+                        "poll_num": poll_num + 1,
+                        "status": status,
+                    }
+
+        if poll_num < max_polls - 1:
+            time.sleep(poll_interval)
+
+    return {
+        "success": False,
+        "completed": False,
+        "timed_out": True,
+        "max_polls": max_polls,
+        "message": f"Transaction not confirmed after {max_polls * poll_interval} seconds",
+    }
+
+
+def wait_for_swap_completion(
+    tx_hashes: list,
+    max_wait_seconds: int = 60,
+    verbose: bool = True,
+) -> dict:
+    """
+    Ожидает завершения нескольких транзакций.
+
+    Args:
+        tx_hashes: Список хэшей транзакций
+        max_wait_seconds: Максимальное время ожидания
+        verbose: Выводить прогресс
+
+    Returns:
+        dict с результатами
+    """
+
+    poll_interval = TX_STATUS_POLL_INTERVAL
+    max_polls = max_wait_seconds // poll_interval
+
+    results = []
+    completed = 0
+    failed = 0
+    timed_out = 0
+
+    for tx_hash in tx_hashes:
+        result = poll_transaction_status(
+            tx_hash, max_polls=max_polls, poll_interval=poll_interval
+        )
+
+        if result.get("completed"):
+            completed += 1
+            if verbose:
+                print(f"✓ Transaction {tx_hash[:8]}... confirmed")
+        elif result.get("timed_out"):
+            timed_out += 1
+            if verbose:
+                print(f"✗ Transaction {tx_hash[:8]}... timed out")
+        else:
+            failed += 1
+            if verbose:
+                print(f"✗ Transaction {tx_hash[:8]}... failed")
+
+        results.append(result)
+
+    return {
+        "success": completed == len(tx_hashes),
+        "total": len(tx_hashes),
+        "completed": completed,
+        "failed": failed,
+        "timed_out": timed_out,
+        "results": results,
+    }
 
 
 # =============================================================================
@@ -851,24 +982,30 @@ Use token symbols or full jetton master addresses.
         "--confirm", action="store_true", help="Confirm and execute swap"
     )
     exec_p.add_argument(
-        "--referral", "-r", dest="referral_address",
-        help="Referral address to receive swap fee (optional)"
+        "--referral",
+        "-r",
+        dest="referral_address",
+        help="Referral address to receive swap fee (optional)",
     )
     exec_p.add_argument(
-        "--referral-fee", type=float, default=0.0,
-        help="Referral fee percent (0-1%%, default: 0)"
+        "--referral-fee",
+        type=float,
+        default=0.0,
+        help="Referral fee percent (0-1%%, default: 0)",
     )
     exec_p.add_argument(
-        "--wait", action="store_true",
-        help="Wait for transaction completion (with --confirm)"
+        "--wait",
+        action="store_true",
+        help="Wait for transaction completion (with --confirm)",
     )
 
     # --- poll ---
-    poll_p = subparsers.add_parser("poll", help="Poll transaction status until completion")
+    poll_p = subparsers.add_parser(
+        "poll", help="Poll transaction status until completion"
+    )
     poll_p.add_argument("--hash", "-x", required=True, help="Transaction hash")
     poll_p.add_argument(
-        "--timeout", type=int, default=60,
-        help="Max wait time in seconds (default: 60)"
+        "--timeout", type=int, default=60, help="Max wait time in seconds (default: 60)"
     )
 
     # --- status ---
@@ -876,10 +1013,12 @@ Use token symbols or full jetton master addresses.
     status_p.add_argument("--hash", "-x", required=True, help="Transaction hash")
 
     # --- tokens ---
-    tokens_p = subparsers.add_parser("tokens", help="List known tokens")
+    subparsers.add_parser("tokens", help="List known tokens")
 
     # --- smart (smart routing) ---
-    smart_p = subparsers.add_parser("smart", help="Get optimized route via smart routing")
+    smart_p = subparsers.add_parser(
+        "smart", help="Get optimized route via smart routing"
+    )
     smart_p.add_argument(
         "--from", "-f", dest="input_token", required=True, help="Input token"
     )
@@ -889,9 +1028,7 @@ Use token symbols or full jetton master addresses.
     smart_p.add_argument(
         "--amount", "-a", type=float, required=True, help="Input amount"
     )
-    smart_p.add_argument(
-        "--wallet", "-w", required=True, help="Wallet address"
-    )
+    smart_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
     smart_p.add_argument(
         "--slippage", "-s", type=float, default=0.5, help="Slippage %% (default: 0.5)"
     )
@@ -903,14 +1040,15 @@ Use token symbols or full jetton master addresses.
     )
 
     # --- multi (multi-swap) ---
-    multi_p = subparsers.add_parser("multi", help="Multi-swap: multiple swaps in one transaction")
-    multi_p.add_argument(
-        "--swaps", required=True,
-        help='JSON array of swaps: [{"input_token":"TON","output_token":"USDT","input_amount":10},...]'
+    multi_p = subparsers.add_parser(
+        "multi", help="Multi-swap: multiple swaps in one transaction"
     )
     multi_p.add_argument(
-        "--wallet", "-w", required=True, help="Wallet address"
+        "--swaps",
+        required=True,
+        help='JSON array of swaps: [{"input_token":"TON","output_token":"USDT","input_amount":10},...]',
     )
+    multi_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
     multi_p.add_argument(
         "--slippage", "-s", type=float, default=0.5, help="Slippage %% (default: 0.5)"
     )
@@ -955,7 +1093,7 @@ Use token symbols or full jetton master addresses.
                         indent=2,
                     )
                 )
-                sys.exit(1)
+                return sys.exit(1)
 
             password = args.password or os.environ.get("WALLET_PASSWORD")
             if not password:
@@ -963,7 +1101,7 @@ Use token symbols or full jetton master addresses.
                     password = getpass.getpass("Wallet password: ")
                 else:
                     print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
+                    return sys.exit(1)
 
             result = execute_swap(
                 from_wallet=args.wallet,
@@ -1006,23 +1144,31 @@ Use token symbols or full jetton master addresses.
                     wallet_data = get_wallet_from_storage(wallet_addr, password)
                     if wallet_data:
                         wallet_addr = wallet_data["address"]
-            
+
             # Resolve tokens
             input_token = args.input_token.upper()
             output_token = args.output_token.upper()
-            
+
             input_addr = KNOWN_TOKENS.get(input_token, input_token)
             output_addr = KNOWN_TOKENS.get(output_token, output_token)
-            
-            # Get token info for decimals
-            input_info = resolve_token_by_symbol(input_token) if input_addr == "native" or input_token in KNOWN_TOKENS else {"decimals": 9}
-            output_info = resolve_token_by_symbol(output_token) if output_addr == "native" or output_token in KNOWN_TOKENS else {"decimals": 9}
-            
-            if input_addr == "native":
-                input_info = {"decimals": 9, "symbol": "TON"}
-            if output_addr == "native":
-                output_info = {"decimals": 9, "symbol": "TON"}
-            
+
+            # # Get token info for decimals
+            # input_info = (
+            #     resolve_token_by_symbol(input_token)
+            #     if input_addr == "native" or input_token in KNOWN_TOKENS
+            #     else {"decimals": 9}
+            # )
+            # output_info = (
+            #     resolve_token_by_symbol(output_token)
+            #     if output_addr == "native" or output_token in KNOWN_TOKENS
+            #     else {"decimals": 9}
+            # )
+
+            # if input_addr == "native":
+            #     input_info = {"decimals": 9, "symbol": "TON"}
+            # if output_addr == "native":
+            #     output_info = {"decimals": 9, "symbol": "TON"}
+
             # Build request with custom routing params
             request_body = {
                 "input_token": {"blockchain": "ton", "address": input_addr},
@@ -1031,26 +1177,33 @@ Use token symbols or full jetton master addresses.
                 "max_splits": args.max_splits,
                 "max_length": args.max_length,
             }
-            
-            route_result = swap_coffee_request("/route", method="POST", json_data=request_body, version="v1")
-            
+
+            route_result = swap_coffee_request(
+                "/route", method="POST", json_data=request_body, version="v1"
+            )
+
             if not route_result["success"]:
-                result = {"success": False, "error": route_result.get("error", "Failed to get smart route")}
+                result = {
+                    "success": False,
+                    "error": route_result.get("error", "Failed to get smart route"),
+                }
             else:
                 data = route_result["data"]
                 output_amount = float(data.get("output_amount", 0))
                 min_output = output_amount * (1 - args.slippage / 100)
-                
+
                 paths = data.get("paths", [])
                 route_info = []
                 for path in paths:
-                    route_info.append({
-                        "dex": path.get("dex", "unknown"),
-                        "pool": path.get("pool_address"),
-                        "input_amount": path.get("swap", {}).get("input_amount"),
-                        "output_amount": path.get("swap", {}).get("output_amount"),
-                    })
-                
+                    route_info.append(
+                        {
+                            "dex": path.get("dex", "unknown"),
+                            "pool": path.get("pool_address"),
+                            "input_amount": path.get("swap", {}).get("input_amount"),
+                            "output_amount": path.get("swap", {}).get("output_amount"),
+                        }
+                    )
+
                 result = {
                     "success": True,
                     "action": "smart_route",
@@ -1089,13 +1242,13 @@ Use token symbols or full jetton master addresses.
                         wallet_data = get_wallet_from_storage(wallet_addr, password)
                         if wallet_data:
                             wallet_addr = wallet_data["address"]
-                
+
                 multi_results = []
                 for i, swap_def in enumerate(swaps):
                     input_token = swap_def.get("input_token", "").upper()
                     output_token = swap_def.get("output_token", "").upper()
                     input_amount = float(swap_def.get("input_amount", 0))
-                    
+
                     quote = get_swap_quote(
                         input_token=input_token,
                         output_token=output_token,
@@ -1103,15 +1256,19 @@ Use token symbols or full jetton master addresses.
                         sender_address=wallet_addr,
                         slippage=args.slippage,
                     )
-                    
-                    multi_results.append({
-                        "index": i,
-                        "input": input_token,
-                        "output": output_token,
-                        "amount": input_amount,
-                        "quote": quote if quote.get("success") else {"error": quote.get("error")},
-                    })
-                
+
+                    multi_results.append(
+                        {
+                            "index": i,
+                            "input": input_token,
+                            "output": output_token,
+                            "amount": input_amount,
+                            "quote": quote
+                            if quote.get("success")
+                            else {"error": quote.get("error")},
+                        }
+                    )
+
                 result = {
                     "success": True,
                     "action": "multi_swap_quote",
@@ -1126,11 +1283,11 @@ Use token symbols or full jetton master addresses.
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         if not result.get("success", False):
-            sys.exit(1)
+            return sys.exit(1)
 
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

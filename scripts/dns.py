@@ -15,7 +15,7 @@ from pathlib import Path
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import tonapi_request, is_valid_address, raw_to_friendly, normalize_address
+from utils import tonapi_request, is_valid_address, raw_to_friendly, normalize_address  # noqa: E402
 
 
 # =============================================================================
@@ -51,7 +51,7 @@ def resolve_domain(domain: str) -> dict:
         domain_clean += ".ton"
 
     # Убираем .ton для API
-    domain_name = domain_clean[:-4]
+    # domain_name = domain_clean[:-4]
 
     # TonAPI DNS resolve
     result = tonapi_request(f"/dns/{domain_clean}/resolve")
@@ -139,7 +139,7 @@ def get_domain_info(domain: str) -> dict:
 def is_ton_domain(address_or_domain: str) -> bool:
     """
     Проверяет, является ли строка .ton доменом.
-    
+
     ВАЖНО: Возвращает True ТОЛЬКО для строк, явно заканчивающихся на .ton
     Не делает предположений о коротких именах — они могут быть лейблами кошельков.
     """
@@ -277,7 +277,7 @@ Examples:
 
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

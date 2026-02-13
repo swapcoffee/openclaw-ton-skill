@@ -15,7 +15,7 @@ import base64
 import hashlib
 import argparse
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 # Зависимости
 try:
@@ -29,6 +29,7 @@ except ImportError:
         )
     )
     sys.exit(1)
+    raise SystemExit
 
 try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -44,6 +45,7 @@ except ImportError:
         )
     )
     sys.exit(1)
+    raise SystemExit
 
 
 # =============================================================================
@@ -314,7 +316,7 @@ def friendly_to_raw(friendly_address: str) -> str:
             raise ValueError("Invalid CRC checksum")
 
         # Парсим
-        tag = data[0]
+        # tag = data[0]
         workchain = int.from_bytes(data[1:2], "big", signed=True)
         hash_bytes = data[2:34]
 
@@ -339,7 +341,7 @@ def is_valid_address(address: str) -> bool:
             # Friendly формат
             friendly_to_raw(address)
             return True
-    except:
+    except Exception:
         return False
 
 
@@ -405,7 +407,7 @@ def create_http_session(
     session.mount("http://", adapter)
 
     # Default timeout через hook
-    session.request = lambda method, url, **kwargs: requests.Session.request(
+    session.request = lambda method, url, **kwargs: requests.Session.request(  # ty: ignore[invalid-assignment]
         session, method, url, timeout=kwargs.pop("timeout", timeout), **kwargs
     )
 
@@ -417,7 +419,7 @@ def api_request(
     method: str = "GET",
     headers: Optional[dict] = None,
     params: Optional[dict] = None,
-    json_data: Optional[dict] = None,
+    json_data: Optional[Union[dict, list]] = None,
     api_key: Optional[str] = None,
     api_key_header: str = "Authorization",
     api_key_prefix: str = "Bearer ",
@@ -463,7 +465,7 @@ def api_request(
         # Пытаемся распарсить JSON
         try:
             data = response.json()
-        except:
+        except Exception:
             data = response.text
 
         if response.ok:
@@ -491,6 +493,7 @@ def api_request(
 def get_swap_coffee_key() -> Optional[str]:
     """Get swap.coffee API key from config or environment."""
     import os
+
     config = load_config()
     return config.get("swap_coffee_key") or os.environ.get("SWAP_COFFEE_KEY")
 
@@ -558,7 +561,7 @@ def tokens_api_request(
     endpoint: str,
     method: str = "GET",
     params: Optional[dict] = None,
-    json_data: Optional[dict] = None,
+    json_data: Optional[Union[dict, list]] = None,
     timeout: int = 30,
     retries: int = 3,
 ) -> dict:
@@ -665,7 +668,7 @@ def main():
     config_set.add_argument("key", help="Config key")
     config_set.add_argument("value", help="Value to set")
 
-    config_show = config_sub.add_parser("show", help="Show all config")
+    config_sub.add_parser("show", help="Show all config")
 
     # --- address ---
     addr_parser = subparsers.add_parser("address", help="Address formatting")
@@ -707,7 +710,7 @@ def main():
             # Try to parse value as JSON
             try:
                 value = json.loads(args.value)
-            except:
+            except Exception:
                 value = args.value
             success = set_config_value(args.key, value)
             result = {"success": success, "key": args.key, "value": value}

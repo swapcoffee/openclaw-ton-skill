@@ -28,13 +28,13 @@ import base64
 import argparse
 import getpass
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List
 
 # Локальный импорт
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import api_request, tonapi_request, load_config, is_valid_address
+from utils import api_request, tonapi_request, load_config, is_valid_address  # noqa: E402
 
 # TON SDK
 try:
@@ -105,6 +105,7 @@ def get_wallet_from_storage(identifier: str, password: str) -> Optional[dict]:
     """Получает кошелёк из хранилища."""
     try:
         from wallet import WalletStorage
+
         storage = WalletStorage(password)
         return storage.get_wallet(identifier, include_secrets=True)
     except Exception:
@@ -148,9 +149,7 @@ def get_seqno(address: str) -> int:
 
 
 def list_staking_pools(
-    protocol: Optional[str] = None,
-    sort_by: str = "apr",
-    limit: int = 20
+    protocol: Optional[str] = None, sort_by: str = "apr", limit: int = 20
 ) -> dict:
     """
     Получает список пулов стейкинга.
@@ -173,7 +172,7 @@ def list_staking_pools(
         "descending_order": True,
         "trusted": True,
         "blockchains": "ton",
-        "providers": protocols
+        "providers": protocols,
     }
 
     result = swap_coffee_request("/yield/pools", params=params)
@@ -181,7 +180,7 @@ def list_staking_pools(
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to get staking pools")
+            "error": result.get("error", "Failed to get staking pools"),
         }
 
     data = result["data"]
@@ -195,7 +194,7 @@ def list_staking_pools(
     normalized = []
     for pool in pools:
         protocol_name = pool.get("protocol", "unknown")
-        
+
         # Only include actual staking protocols
         if protocol_name not in STAKING_PROTOCOLS:
             continue
@@ -208,32 +207,38 @@ def list_staking_pools(
         for t in tokens:
             addr_info = t.get("address", {})
             metadata = t.get("metadata", {}) or {}
-            token_info.append({
-                "address": addr_info.get("address") if isinstance(addr_info, dict) else addr_info,
-                "symbol": metadata.get("symbol", "?"),
-                "name": metadata.get("name"),
-                "decimals": metadata.get("decimals", 9),
-            })
+            token_info.append(
+                {
+                    "address": addr_info.get("address")
+                    if isinstance(addr_info, dict)
+                    else addr_info,
+                    "symbol": metadata.get("symbol", "?"),
+                    "name": metadata.get("name"),
+                    "decimals": metadata.get("decimals", 9),
+                }
+            )
 
-        normalized.append({
-            "address": pool.get("address"),
-            "protocol": protocol_name,
-            "is_trusted": pool.get("is_trusted", False),
-            "tokens": token_info,
-            "base_token": token_info[0] if token_info else None,
-            "liquid_token": token_info[1] if len(token_info) > 1 else None,
-            "tvl_usd": stats.get("tvl_usd", 0),
-            "apr": stats.get("apr", 0),
-            "lp_apr": stats.get("lp_apr", 0),
-            "boost_apr": stats.get("boost_apr", 0),
-        })
+        normalized.append(
+            {
+                "address": pool.get("address"),
+                "protocol": protocol_name,
+                "is_trusted": pool.get("is_trusted", False),
+                "tokens": token_info,
+                "base_token": token_info[0] if token_info else None,
+                "liquid_token": token_info[1] if len(token_info) > 1 else None,
+                "tvl_usd": stats.get("tvl_usd", 0),
+                "apr": stats.get("apr", 0),
+                "lp_apr": stats.get("lp_apr", 0),
+                "boost_apr": stats.get("boost_apr", 0),
+            }
+        )
 
     return {
         "success": True,
         "total_count": total_count,
         "pools_count": len(normalized),
         "protocols": protocols,
-        "pools": normalized
+        "pools": normalized,
     }
 
 
@@ -254,7 +259,7 @@ def get_pool_details(pool_address: str) -> dict:
         return {
             "success": False,
             "error": result.get("error", "Pool not found"),
-            "pool_address": pool_address
+            "pool_address": pool_address,
         }
 
     data = result["data"]
@@ -264,7 +269,7 @@ def get_pool_details(pool_address: str) -> dict:
         "pool_address": pool_address,
         "pool": data.get("pool"),
         "statistics": data.get("pool_statistics"),
-        "raw_response": data
+        "raw_response": data,
     }
 
 
@@ -297,11 +302,11 @@ def get_user_position(pool_address: str, wallet_address: str) -> dict:
                 "wallet_address": wallet_address,
                 "has_position": False,
                 "position": None,
-                "message": "No position in this pool"
+                "message": "No position in this pool",
             }
         return {
             "success": False,
-            "error": result.get("error", "Failed to get position")
+            "error": result.get("error", "Failed to get position"),
         }
 
     data = result["data"]
@@ -312,7 +317,7 @@ def get_user_position(pool_address: str, wallet_address: str) -> dict:
         "wallet_address": wallet_address,
         "has_position": True,
         "position": data.get("position") or data,
-        "raw_response": data
+        "raw_response": data,
     }
 
 
@@ -341,16 +346,13 @@ def get_all_positions(wallet_address: str) -> dict:
 
         pos_result = get_user_position(pool_addr, wallet_address)
         if pos_result.get("success") and pos_result.get("has_position"):
-            positions.append({
-                "pool": pool,
-                "position": pos_result.get("position")
-            })
+            positions.append({"pool": pool, "position": pos_result.get("position")})
 
     return {
         "success": True,
         "wallet_address": wallet_address,
         "positions_count": len(positions),
-        "positions": positions
+        "positions": positions,
     }
 
 
@@ -379,12 +381,9 @@ def get_staking_points(wallet_address: str) -> dict:
                 "success": True,
                 "wallet_address": wallet_address,
                 "points": 0,
-                "message": "No points found"
+                "message": "No points found",
             }
-        return {
-            "success": False,
-            "error": result.get("error", "Failed to get points")
-        }
+        return {"success": False, "error": result.get("error", "Failed to get points")}
 
     data = result["data"]
 
@@ -393,7 +392,7 @@ def get_staking_points(wallet_address: str) -> dict:
         "wallet_address": wallet_address,
         "points": data.get("points", 0),
         "rewards": data.get("rewards"),
-        "raw_response": data
+        "raw_response": data,
     }
 
 
@@ -433,29 +432,31 @@ def build_stake_tx(
                 "yieldTypeResolver": "liquid_staking_stake",
                 "amount": str(amount_nano),
             }
-        }
+        },
     )
 
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to build stake transaction")
+            "error": result.get("error", "Failed to build stake transaction"),
         }
 
     data = result["data"]
 
     # API возвращает массив транзакций
     transactions = data if isinstance(data, list) else data.get("transactions", [data])
-    
+
     # Преобразуем формат ответа для execute_staking_tx
     normalized_txs = []
     for tx in transactions:
         msg = tx.get("message", {})
-        normalized_txs.append({
-            "address": msg.get("address"),
-            "value": msg.get("value"),
-            "cell": msg.get("payload_cell"),
-        })
+        normalized_txs.append(
+            {
+                "address": msg.get("address"),
+                "value": msg.get("value"),
+                "cell": msg.get("payload_cell"),
+            }
+        )
 
     return {
         "success": True,
@@ -465,7 +466,7 @@ def build_stake_tx(
         "amount": amount,
         "transactions": normalized_txs,
         "query_id": transactions[0].get("query_id") if transactions else None,
-        "raw_response": data
+        "raw_response": data,
     }
 
 
@@ -505,29 +506,31 @@ def build_unstake_tx(
     result = swap_coffee_request(
         f"/yield/pool/{pool_safe}/{wallet_safe}",
         method="POST",
-        json_data={"request_data": request_data}
+        json_data={"request_data": request_data},
     )
 
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to build unstake transaction")
+            "error": result.get("error", "Failed to build unstake transaction"),
         }
 
     data = result["data"]
 
     # API возвращает массив транзакций
     transactions = data if isinstance(data, list) else data.get("transactions", [data])
-    
+
     # Преобразуем формат ответа для execute_staking_tx
     normalized_txs = []
     for tx in transactions:
         msg = tx.get("message", {})
-        normalized_txs.append({
-            "address": msg.get("address"),
-            "value": msg.get("value"),
-            "cell": msg.get("payload_cell"),
-        })
+        normalized_txs.append(
+            {
+                "address": msg.get("address"),
+                "value": msg.get("value"),
+                "cell": msg.get("payload_cell"),
+            }
+        )
 
     return {
         "success": True,
@@ -538,7 +541,7 @@ def build_unstake_tx(
         "close_position": close_position,
         "transactions": normalized_txs,
         "query_id": transactions[0].get("query_id") if transactions else None,
-        "raw_response": data
+        "raw_response": data,
     }
 
 
@@ -567,13 +570,13 @@ def build_extend_stake_tx(
         json_data={
             "action": "extend",
             "extend_seconds": extend_days * 86400,
-        }
+        },
     )
 
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to build extend transaction")
+            "error": result.get("error", "Failed to build extend transaction"),
         }
 
     data = result["data"]
@@ -586,7 +589,7 @@ def build_extend_stake_tx(
         "extend_days": extend_days,
         "transactions": data.get("transactions", []),
         "query_id": data.get("query_id"),
-        "raw_response": data
+        "raw_response": data,
     }
 
 
@@ -598,9 +601,7 @@ def build_extend_stake_tx(
 def emulate_transaction(boc_b64: str) -> dict:
     """Эмулирует транзакцию."""
     result = tonapi_request(
-        "/wallet/emulate",
-        method="POST",
-        json_data={"boc": boc_b64}
+        "/wallet/emulate", method="POST", json_data={"boc": boc_b64}
     )
 
     if not result["success"]:
@@ -622,9 +623,7 @@ def emulate_transaction(boc_b64: str) -> dict:
 def send_transaction(boc_b64: str) -> dict:
     """Отправляет транзакцию."""
     result = tonapi_request(
-        "/blockchain/message",
-        method="POST",
-        json_data={"boc": boc_b64}
+        "/blockchain/message", method="POST", json_data={"boc": boc_b64}
     )
 
     if not result["success"]:
@@ -634,10 +633,7 @@ def send_transaction(boc_b64: str) -> dict:
 
 
 def execute_staking_tx(
-    wallet_label: str,
-    transactions: List[dict],
-    password: str,
-    confirm: bool = False
+    wallet_label: str, transactions: List[dict], password: str, confirm: bool = False
 ) -> dict:
     """
     Выполняет транзакции стейкинга.
@@ -698,14 +694,16 @@ def execute_staking_tx(
 
         emulation = emulate_transaction(boc_b64)
 
-        signed_txs.append({
-            "index": i,
-            "to": to_addr,
-            "amount_nano": amount,
-            "amount_ton": amount / 1e9,
-            "boc": boc_b64,
-            "emulation": emulation,
-        })
+        signed_txs.append(
+            {
+                "index": i,
+                "to": to_addr,
+                "amount_nano": amount,
+                "amount_ton": amount / 1e9,
+                "boc": boc_b64,
+                "emulation": emulation,
+            }
+        )
 
         if emulation["success"]:
             total_fee += emulation.get("fee_nano", 0)
@@ -788,7 +786,7 @@ Examples:
   %(prog)s unstake --pool EQCkWx... --wallet main --close --confirm
 
 Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
-"""
+""",
     )
 
     parser.add_argument(
@@ -799,9 +797,15 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
 
     # --- pools ---
     pools_p = subparsers.add_parser("pools", help="List staking pools")
-    pools_p.add_argument("--protocol", choices=STAKING_PROTOCOLS, help="Filter by protocol")
-    pools_p.add_argument("--sort", default="apr", choices=["apr", "tvl"], help="Sort by field")
-    pools_p.add_argument("--limit", "-n", type=int, default=20, help="Number of results")
+    pools_p.add_argument(
+        "--protocol", choices=STAKING_PROTOCOLS, help="Filter by protocol"
+    )
+    pools_p.add_argument(
+        "--sort", default="apr", choices=["apr", "tvl"], help="Sort by field"
+    )
+    pools_p.add_argument(
+        "--limit", "-n", type=int, default=20, help="Number of results"
+    )
 
     # --- pool ---
     pool_p = subparsers.add_parser("pool", help="Get pool details")
@@ -813,7 +817,9 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
     pos_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
 
     # --- positions ---
-    positions_p = subparsers.add_parser("positions", help="Get all positions for wallet")
+    positions_p = subparsers.add_parser(
+        "positions", help="Get all positions for wallet"
+    )
     positions_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
 
     # --- points ---
@@ -824,7 +830,9 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
     stake_p = subparsers.add_parser("stake", help="Stake tokens")
     stake_p.add_argument("--pool", required=True, help="Pool address")
     stake_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
-    stake_p.add_argument("--amount", "-a", type=float, required=True, help="Amount to stake")
+    stake_p.add_argument(
+        "--amount", "-a", type=float, required=True, help="Amount to stake"
+    )
     stake_p.add_argument("--confirm", action="store_true", help="Confirm execution")
 
     # --- unstake ---
@@ -839,7 +847,9 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
     extend_p = subparsers.add_parser("extend", help="Extend staking period")
     extend_p.add_argument("--pool", required=True, help="Pool address")
     extend_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
-    extend_p.add_argument("--days", "-d", type=int, required=True, help="Days to extend")
+    extend_p.add_argument(
+        "--days", "-d", type=int, required=True, help="Days to extend"
+    )
     extend_p.add_argument("--confirm", action="store_true", help="Confirm execution")
 
     args = parser.parse_args()
@@ -853,9 +863,7 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
 
         if args.command == "pools":
             result = list_staking_pools(
-                protocol=args.protocol,
-                sort_by=args.sort,
-                limit=args.limit
+                protocol=args.protocol, sort_by=args.sort, limit=args.limit
             )
 
         elif args.command == "pool":
@@ -895,17 +903,17 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
                     password = getpass.getpass("Wallet password: ")
                 else:
                     print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
+                    return sys.exit(1)
 
             wallet_data = get_wallet_from_storage(args.wallet, password)
             if not wallet_data:
                 print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             tx_result = build_stake_tx(
                 pool_address=args.pool,
                 wallet_address=wallet_data["address"],
-                amount=args.amount
+                amount=args.amount,
             )
 
             if not tx_result["success"]:
@@ -915,7 +923,7 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
                     wallet_label=args.wallet,
                     transactions=tx_result["transactions"],
                     password=password,
-                    confirm=args.confirm
+                    confirm=args.confirm,
                 )
                 result["action"] = "stake"
                 result["pool_address"] = args.pool
@@ -929,18 +937,18 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
                     password = getpass.getpass("Wallet password: ")
                 else:
                     print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
+                    return sys.exit(1)
 
             wallet_data = get_wallet_from_storage(args.wallet, password)
             if not wallet_data:
                 print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             tx_result = build_unstake_tx(
                 pool_address=args.pool,
                 wallet_address=wallet_data["address"],
                 amount=args.amount,
-                close_position=args.close
+                close_position=args.close,
             )
 
             if not tx_result["success"]:
@@ -950,7 +958,7 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
                     wallet_label=args.wallet,
                     transactions=tx_result["transactions"],
                     password=password,
-                    confirm=args.confirm
+                    confirm=args.confirm,
                 )
                 result["action"] = "unstake"
                 result["pool_address"] = args.pool
@@ -965,17 +973,17 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
                     password = getpass.getpass("Wallet password: ")
                 else:
                     print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
+                    return sys.exit(1)
 
             wallet_data = get_wallet_from_storage(args.wallet, password)
             if not wallet_data:
                 print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
-                sys.exit(1)
+                return sys.exit(1)
 
             tx_result = build_extend_stake_tx(
                 pool_address=args.pool,
                 wallet_address=wallet_data["address"],
-                extend_days=args.days
+                extend_days=args.days,
             )
 
             if not tx_result["success"]:
@@ -985,7 +993,7 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
                     wallet_label=args.wallet,
                     transactions=tx_result["transactions"],
                     password=password,
-                    confirm=args.confirm
+                    confirm=args.confirm,
                 )
                 result["action"] = "extend"
                 result["pool_address"] = args.pool
@@ -999,11 +1007,11 @@ Supported protocols: tonstakers, stakee, bemo, bemo_v2, hipo, kton
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         if not result.get("success", False):
-            sys.exit(1)
+            return sys.exit(1)
 
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -16,14 +16,14 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import Optional, List
-from datetime import datetime
+from typing import Optional, List, Union
+from datetime import datetime, UTC
 
 # Локальный импорт
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from dyor import (
+from dyor import (  # noqa: E402
     get_token_info,
     get_trust_score,
     get_price_history,
@@ -32,7 +32,7 @@ from dyor import (
     get_dyor_api_key,
     KNOWN_TOKENS,
 )
-from tokens import get_token_market_data, get_jetton_info
+from tokens import get_token_market_data  # noqa: E402
 
 
 # =============================================================================
@@ -70,12 +70,36 @@ def get_full_token_info(token: str) -> dict:
     except Exception:
         pass
 
+    holders_count: Union[int, None] = tokens_api_data.get("holders_count") or info.get(
+        "holders_count"
+    )
+    liquidity: Union[int, float, None] = tokens_api_data.get("tvl_usd") or info.get(
+        "liquidity"
+    )
+    price_usd: Union[float, None] = tokens_api_data.get("price_usd") or info.get(
+        "price_usd"
+    )
+    market_cap: Union[int, float, None] = tokens_api_data.get("mcap") or info.get(
+        "market_cap"
+    )
+    volume_24h: Union[int, float, None] = tokens_api_data.get(
+        "volume_usd_24h"
+    ) or info.get("volume_24h")
+
     # Объединяем (swap.coffee > DYOR > TonAPI)
     result = {
         "success": info.get("success", False) or bool(tokens_api_data),
         "token": token,
         "address": token_address,
-        "sources": [s for s in [info.get("source"), trust.get("source"), "swap.coffee" if tokens_api_data else None] if s],
+        "sources": [
+            s
+            for s in [
+                info.get("source"),
+                trust.get("source"),
+                "swap.coffee" if tokens_api_data else None,
+            ]
+            if s
+        ],
         # Metadata
         "name": tokens_api_data.get("name") or info.get("name"),
         "symbol": tokens_api_data.get("symbol") or info.get("symbol"),
@@ -83,21 +107,25 @@ def get_full_token_info(token: str) -> dict:
         "image": info.get("image"),
         "description": info.get("description"),
         # Market data (prefer swap.coffee)
-        "price_usd": tokens_api_data.get("price_usd") or info.get("price_usd"),
-        "price_change_24h": tokens_api_data.get("price_change_24h") or info.get("price_change_24h"),
-        "market_cap": tokens_api_data.get("mcap") or info.get("market_cap"),
-        "fully_diluted_mcap": tokens_api_data.get("fdmc") or info.get("fully_diluted_mcap"),
-        "volume_24h": tokens_api_data.get("volume_usd_24h") or info.get("volume_24h"),
-        "liquidity": tokens_api_data.get("tvl_usd") or info.get("liquidity"),
+        "price_usd": price_usd,
+        "price_change_24h": tokens_api_data.get("price_change_24h")
+        or info.get("price_change_24h"),
+        "market_cap": market_cap,
+        "fully_diluted_mcap": tokens_api_data.get("fdmc")
+        or info.get("fully_diluted_mcap"),
+        "volume_24h": volume_24h,
+        "liquidity": liquidity,
         # Supply
         "total_supply": info.get("total_supply"),
         "circulating_supply": info.get("circulating_supply"),
-        "holders_count": tokens_api_data.get("holders_count") or info.get("holders_count"),
+        "holders_count": holders_count,
         "mintable": info.get("mintable"),
         # Trust (prefer swap.coffee trust_score)
         "trust_score": tokens_api_data.get("trust_score") or trust.get("trust_score"),
         "trust_level": trust.get("trust_level"),
-        "verification": tokens_api_data.get("verification") or info.get("verification") or trust.get("verification"),
+        "verification": tokens_api_data.get("verification")
+        or info.get("verification")
+        or trust.get("verification"),
         "warnings": trust.get("warnings", []),
         "flags": trust.get("flags", []),
         # Links
@@ -105,16 +133,16 @@ def get_full_token_info(token: str) -> dict:
         "websites": info.get("websites", []),
         # Meta
         "created_at": info.get("created_at"),
-        "fetched_at": datetime.utcnow().isoformat(),
+        "fetched_at": datetime.now(UTC).isoformat(),
     }
 
     # Форматируем большие числа
     result["formatted"] = {
-        "price": _format_price(result.get("price_usd")),
-        "market_cap": _format_large_number(result.get("market_cap")),
-        "volume_24h": _format_large_number(result.get("volume_24h")),
-        "liquidity": _format_large_number(result.get("liquidity")),
-        "holders": _format_number(result.get("holders_count")),
+        "price": _format_price(price_usd),
+        "market_cap": _format_large_number(market_cap),
+        "volume_24h": _format_large_number(volume_24h),
+        "liquidity": _format_large_number(liquidity),
+        "holders": _format_number(holders_count),
     }
 
     return result
@@ -462,10 +490,10 @@ Notes:
     )
 
     # --- tokens ---
-    tokens_p = subparsers.add_parser("tokens", help="List known tokens")
+    subparsers.add_parser("tokens", help="List known tokens")
 
     # --- status ---
-    status_p = subparsers.add_parser("status", help="Check API status")
+    subparsers.add_parser("status", help="Check API status")
 
     args = parser.parse_args()
 
@@ -529,11 +557,11 @@ Notes:
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         if not result.get("success", True):
-            sys.exit(1)
+            return sys.exit(1)
 
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))
-        sys.exit(1)
+        return sys.exit(1)
 
 
 if __name__ == "__main__":

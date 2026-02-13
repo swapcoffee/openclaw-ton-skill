@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
-from datetime import datetime
+from datetime import datetime, UTC
 
 import pytest
 
@@ -131,7 +131,7 @@ class TestWalletCreation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "трейдинг"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -149,7 +149,7 @@ class TestWalletCreation:
             wallet_data = mnemonic_to_wallet(mnemonic)
             wallet_data["mnemonic"] = mnemonic
             wallet_data["label"] = f"wallet_{i}"
-            wallet_data["created_at"] = datetime.utcnow().isoformat()
+            wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
             addresses.add(wallet_data["address"])
             mnemonics.add(" ".join(mnemonic))
@@ -167,7 +167,7 @@ class TestWalletCreation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "first"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -184,7 +184,7 @@ class TestWalletCreation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = ""
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -198,7 +198,7 @@ class TestWalletCreation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "💰 основной! 🚀"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -282,7 +282,7 @@ class TestWalletImport:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "first"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -311,7 +311,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -334,7 +334,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -354,7 +354,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -373,7 +373,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -392,7 +392,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -412,7 +412,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -434,7 +434,7 @@ class TestEncryptedStorage:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -469,7 +469,7 @@ class TestWalletListAndBalance:
             wallet_data = mnemonic_to_wallet(mnemonic)
             wallet_data["mnemonic"] = mnemonic
             wallet_data["label"] = f"wallet_{i}"
-            wallet_data["created_at"] = datetime.utcnow().isoformat()
+            wallet_data["created_at"] = datetime.now(UTC).isoformat()
             storage.add_wallet(wallet_data)
 
         wallets = storage.get_wallets()
@@ -487,7 +487,7 @@ class TestWalletListAndBalance:
         wallet_data["mnemonic"] = mnemonic
         wallet_data["private_key"] = "secret_key"
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         wallets = storage.get_wallets(include_secrets=False)
@@ -503,7 +503,7 @@ class TestWalletListAndBalance:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "MyWallet"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         # Find by label (case-insensitive)
@@ -518,7 +518,7 @@ class TestWalletListAndBalance:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         address = wallet_data["address"]
@@ -609,7 +609,7 @@ class TestWalletRemoval:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "to_remove"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         assert len(storage.get_wallets()) == 1
@@ -624,7 +624,7 @@ class TestWalletRemoval:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         address = wallet_data["address"]
@@ -655,7 +655,7 @@ class TestWalletUpdate:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "old_label"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         storage.update_wallet("old_label", {"label": "new_label"})
@@ -684,7 +684,7 @@ class TestSecurityLeaks:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         # Regular listing should not include mnemonic
@@ -703,7 +703,7 @@ class TestSecurityLeaks:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         # Try with wrong password
@@ -732,7 +732,7 @@ class TestInputValidation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = malicious_label
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -749,7 +749,7 @@ class TestInputValidation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = xss_label
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -765,7 +765,7 @@ class TestInputValidation:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = malicious_label
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         # Should either accept or reject, not crash
         try:
@@ -869,7 +869,7 @@ class TestEdgeCases:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "test"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
         storage.add_wallet(wallet_data)
 
         wallets_file = temp_wallet_storage["wallets_file"]
@@ -887,7 +887,7 @@ class TestEdgeCases:
         wallet_data = mnemonic_to_wallet(mnemonic)
         wallet_data["mnemonic"] = mnemonic
         wallet_data["label"] = "テスト 🎉 <>&\"'"
-        wallet_data["created_at"] = datetime.utcnow().isoformat()
+        wallet_data["created_at"] = datetime.now(UTC).isoformat()
 
         storage.add_wallet(wallet_data)
 
@@ -939,7 +939,7 @@ class TestPerformance:
             wallet_data = mnemonic_to_wallet(mnemonic)
             wallet_data["mnemonic"] = mnemonic
             wallet_data["label"] = f"wallet_{i}"
-            wallet_data["created_at"] = datetime.utcnow().isoformat()
+            wallet_data["created_at"] = datetime.now(UTC).isoformat()
             storage.add_wallet(wallet_data)
 
         start = time.time()
