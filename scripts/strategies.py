@@ -38,6 +38,7 @@ import struct
 import hashlib
 import argparse
 import getpass
+import secrets
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -105,6 +106,13 @@ def generate_ton_proof(
     The proof follows TonConnect specification:
     https://docs.ton.org/v3/guidelines/ton-connect/verifying-signed-in-users
     
+    swap.coffee API expects ApiTonProof format:
+    - timestamp: number
+    - domain_len: number
+    - domain_val: string
+    - payload: string
+    - signature: string (base64)
+    
     Args:
         wallet_address: User's wallet address (friendly or raw format)
         private_key: 32-byte Ed25519 private key (seed)
@@ -169,15 +177,13 @@ def generate_ton_proof(
     signing_key = nacl.signing.SigningKey(private_key[:32])
     signature = signing_key.sign(full_hash).signature
     
-    # Build proof structure
+    # Build proof structure matching swap.coffee ApiTonProof format
     proof = {
         "timestamp": timestamp,
-        "domain": {
-            "lengthBytes": domain_len,
-            "value": domain,
-        },
-        "signature": base64.b64encode(signature).decode('ascii'),
+        "domain_len": domain_len,
+        "domain_val": domain,
         "payload": payload,
+        "signature": base64.b64encode(signature).decode('ascii'),
     }
     
     return proof
@@ -188,30 +194,37 @@ def generate_xverify_header(
     private_key: bytes,
     public_key: bytes,
     state_init_b64: Optional[str] = None,
-    payload: str = "",
+    payload: Optional[str] = None,
 ) -> str:
     """
     Generate x-verify header value for swap.coffee API.
+    
+    Format matches ApiProofValidationRequest:
+    - public_key: hex string
+    - wallet_state_init: base64 string
+    - proof: ApiTonProof
     
     Args:
         wallet_address: User's wallet address
         private_key: 32-byte Ed25519 private key
         public_key: 32-byte Ed25519 public key
         state_init_b64: Optional base64-encoded stateInit
-        payload: Optional payload/nonce
+        payload: Optional payload/nonce (if None, generates random)
     
     Returns:
         JSON string to use as x-verify header value
     """
+    # Generate random payload if not provided (required by swap.coffee)
+    if payload is None:
+        payload = secrets.token_hex(32)
+    
     proof = generate_ton_proof(wallet_address, private_key, payload)
     
+    # Format matching ApiProofValidationRequest
     xverify = {
-        "address": wallet_address,
         "public_key": public_key.hex(),
-        "proof": {
-            **proof,
-            "state_init": state_init_b64 or "",
-        }
+        "wallet_state_init": state_init_b64 or "",
+        "proof": proof,
     }
     
     return json.dumps(xverify, separators=(',', ':'))
@@ -1184,7 +1197,7 @@ DCA Order Settings:
             result = check_strategy_wallet(wallet_addr, xverify)
         
         # Commands that require wallet auth
-        elif args.command in ("create-wallet", "list-orders", "get-order", "create-order", "cancel-order"):
+        elif args.command in ("eligible", "create-wallet", "list-orders", "get-order", "create-order", "cancel-order"):
             if not password:
                 if sys.stdin.isatty():
                     password = getpass.getpass("Wallet password: ")
@@ -1317,5 +1330,4 @@ DCA Order Settings:
 
 
 if __name__ == "__main__":
-    main()
     main()
