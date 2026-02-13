@@ -689,7 +689,7 @@ def create_order(
     input_amount: str,
     max_suborders: int = 1,
     max_invocations: int = 1,
-    slippage: float = 1.0,
+    slippage: float = 0.01,
     settings: Optional[dict] = None,
 ) -> dict:
     """
@@ -706,7 +706,7 @@ def create_order(
         input_amount: Amount in nano-units (string)
         max_suborders: Max suborders (default 1)
         max_invocations: Max invocations (default 1)
-        slippage: Slippage percentage (default 1%)
+        slippage: Slippage as decimal (0.0-1.0, e.g. 0.01=1%, 0.05=5%)
         settings: Order-specific settings:
             - For limit: {"min_output_amount": "VALUE"}
             - For DCA: {"delay": 3600, "price_range_from": 0.0, "price_range_to": 0.0}
@@ -1062,7 +1062,7 @@ Examples:
   # Create limit order (buy USDT when price is good)
   %(prog)s create-order --wallet main --type limit \\
       --from TON --to USDT --amount 10 \\
-      --min-output 50000000000 --slippage 1 --confirm
+      --min-output 50000000000 --slippage 0.01 --confirm
   
   # Create DCA order (buy USDT every hour)
   %(prog)s create-order --wallet main --type dca \\
@@ -1140,7 +1140,7 @@ DCA Order Settings:
     co_p.add_argument("--from", "-f", dest="from_token", required=True, help="From token")
     co_p.add_argument("--to", dest="to_token", required=True, help="To token")
     co_p.add_argument("--amount", "-a", required=True, help="Input amount (TON/token units)")
-    co_p.add_argument("--slippage", type=float, default=1.0, help="Slippage %% (default: 1)")
+    co_p.add_argument("--slippage", type=float, default=0.01, help="Slippage (0.0-1.0, e.g. 0.01=1%%, 0.05=5%%). Default: 0.01")
     co_p.add_argument("--suborders", type=int, default=1, help="Max suborders (default: 1)")
     # Limit order settings
     co_p.add_argument("--min-output", help="Minimum output amount (nano-units) for limit orders")
