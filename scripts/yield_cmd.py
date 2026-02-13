@@ -908,12 +908,228 @@ def withdraw_liquidity(
     }
 
 
+def stake_liquidity(
+    pool_address: str,
+    user_address: str,
+    amount: str,
+) -> dict:
+    """
+    Создаёт транзакцию для стейкинга в liquid staking пул.
+    
+    Поддерживаемые протоколы: tonstakers, bemo, bemo_v2, hipo, kton, stakee
+    
+    Args:
+        pool_address: Адрес пула liquid staking
+        user_address: Адрес кошелька пользователя
+        amount: Количество токенов (в минимальных единицах, например nanoTON)
+    
+    Returns:
+        dict с транзакцией для отправки через TonConnect
+    """
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    url = f"/yield/pool/{pool_safe}/{user_safe}"
+    
+    body = {
+        "request_data": {
+            "yieldTypeResolver": "liquid_staking_stake",
+            "amount": str(amount),
+        }
+    }
+    
+    result = swap_coffee_request(url, method="POST", json_data=body)
+    
+    if result["success"]:
+        transactions = result["data"]
+        return {
+            "success": True,
+            "operation": "stake",
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "amount": amount,
+            "transactions_count": len(transactions) if isinstance(transactions, list) else 1,
+            "transactions": transactions,
+            "note": "Send this transaction via TonConnect to stake",
+        }
+    
+    error = result.get("error", "Unknown error")
+    error_msg = error.get("error", str(error)) if isinstance(error, dict) else str(error)
+    
+    return {
+        "success": False,
+        "error": error_msg,
+        "status_code": result.get("status_code"),
+    }
+
+
+def unstake_liquidity(
+    pool_address: str,
+    user_address: str,
+    amount: str,
+) -> dict:
+    """
+    Создаёт транзакцию для анстейкинга из liquid staking пула.
+    
+    Args:
+        pool_address: Адрес пула liquid staking
+        user_address: Адрес кошелька пользователя
+        amount: Количество liquid staking токенов (например tsTON, stTON)
+    
+    Returns:
+        dict с транзакцией для отправки через TonConnect
+    """
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    url = f"/yield/pool/{pool_safe}/{user_safe}"
+    
+    body = {
+        "request_data": {
+            "yieldTypeResolver": "liquid_staking_unstake",
+            "amount": str(amount),
+        }
+    }
+    
+    result = swap_coffee_request(url, method="POST", json_data=body)
+    
+    if result["success"]:
+        transactions = result["data"]
+        return {
+            "success": True,
+            "operation": "unstake",
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "amount": amount,
+            "transactions_count": len(transactions) if isinstance(transactions, list) else 1,
+            "transactions": transactions,
+            "note": "Send this transaction via TonConnect to unstake",
+        }
+    
+    error = result.get("error", "Unknown error")
+    error_msg = error.get("error", str(error)) if isinstance(error, dict) else str(error)
+    
+    return {
+        "success": False,
+        "error": error_msg,
+        "status_code": result.get("status_code"),
+    }
+
+
+def lending_deposit(
+    pool_address: str,
+    user_address: str,
+    amount: str,
+) -> dict:
+    """
+    Создаёт транзакцию для депозита в lending протокол.
+    
+    Поддерживаемые протоколы: evaa
+    
+    Args:
+        pool_address: Адрес пула lending
+        user_address: Адрес кошелька пользователя
+        amount: Количество токенов для депозита
+    
+    Returns:
+        dict с транзакцией для отправки через TonConnect
+    """
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    url = f"/yield/pool/{pool_safe}/{user_safe}"
+    
+    body = {
+        "request_data": {
+            "yieldTypeResolver": "lending_deposit",
+            "amount": str(amount),
+        }
+    }
+    
+    result = swap_coffee_request(url, method="POST", json_data=body)
+    
+    if result["success"]:
+        transactions = result["data"]
+        return {
+            "success": True,
+            "operation": "lending_deposit",
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "amount": amount,
+            "transactions_count": len(transactions) if isinstance(transactions, list) else 1,
+            "transactions": transactions,
+            "note": "Send this transaction via TonConnect to deposit to lending",
+        }
+    
+    error = result.get("error", "Unknown error")
+    error_msg = error.get("error", str(error)) if isinstance(error, dict) else str(error)
+    
+    return {
+        "success": False,
+        "error": error_msg,
+        "status_code": result.get("status_code"),
+    }
+
+
+def lending_withdraw(
+    pool_address: str,
+    user_address: str,
+    amount: str,
+) -> dict:
+    """
+    Создаёт транзакцию для вывода из lending протокола.
+    
+    Args:
+        pool_address: Адрес пула lending
+        user_address: Адрес кошелька пользователя
+        amount: Количество токенов для вывода
+    
+    Returns:
+        dict с транзакцией для отправки через TonConnect
+    """
+    pool_safe = _make_url_safe(pool_address)
+    user_safe = _make_url_safe(user_address)
+    
+    url = f"/yield/pool/{pool_safe}/{user_safe}"
+    
+    body = {
+        "request_data": {
+            "yieldTypeResolver": "lending_withdraw",
+            "amount": str(amount),
+        }
+    }
+    
+    result = swap_coffee_request(url, method="POST", json_data=body)
+    
+    if result["success"]:
+        transactions = result["data"]
+        return {
+            "success": True,
+            "operation": "lending_withdraw",
+            "pool_address": pool_address,
+            "user_address": user_address,
+            "amount": amount,
+            "transactions_count": len(transactions) if isinstance(transactions, list) else 1,
+            "transactions": transactions,
+            "note": "Send this transaction via TonConnect to withdraw from lending",
+        }
+    
+    error = result.get("error", "Unknown error")
+    error_msg = error.get("error", str(error)) if isinstance(error, dict) else str(error)
+    
+    return {
+        "success": False,
+        "error": error_msg,
+        "status_code": result.get("status_code"),
+    }
+
+
 def check_transaction_status(query_ids: List[str]) -> dict:
     """
     Проверяет статус транзакций по query_id.
     
     Args:
-        query_ids: Список query_id из ответов deposit/withdraw
+        query_ids: Список query_id из ответов deposit/withdraw/stake/unstake
     
     Returns:
         dict со статусами транзакций
@@ -944,45 +1160,29 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # List pools (page 1, sorted by APR)
-  %(prog)s pools
-  %(prog)s pools --sort tvl --limit 50
-  
-  # Pagination
-  %(prog)s pools --page 2 --limit 100
-  %(prog)s pools --all  # all 2000 pools
-  
-  # Filters (client-side, fetches all pools)
+  # List pools
   %(prog)s pools --protocol dedust --token USDT --min-tvl 100000
   
-  # Pool details
-  %(prog)s pool --id EQD...abc
+  # DEX liquidity (stonfi_v2, dedust, tonco)
+  %(prog)s deposit --pool EQA-X... --wallet EQAT... --amount1 1e9 --amount2 1e9
+  %(prog)s withdraw --pool EQA-X... --wallet EQAT... --lp-amount 1000000000
   
-  # Recommendations (fetches all pools for analysis)
-  %(prog)s recommend --risk low --token TON
+  # Liquid staking (tonstakers, bemo, hipo, etc.)
+  %(prog)s stake --pool EQCkW... --wallet EQAT... --amount 1000000000
+  %(prog)s unstake --pool EQCkW... --wallet EQAT... --amount 1000000000
   
-  # Deposit liquidity (returns transactions for TonConnect)
-  %(prog)s deposit --pool EQA-X_yo... --wallet EQAT... --amount1 1000000000 --amount2 1000000000
+  # Lending (evaa)
+  %(prog)s lend-deposit --pool EQC8r... --wallet EQAT... --amount 1000000000
+  %(prog)s lend-withdraw --pool EQC8r... --wallet EQAT... --amount 1000000000
   
-  # Withdraw liquidity (returns transaction for TonConnect)
-  %(prog)s withdraw --pool EQA-X_yo... --wallet EQAT... --lp-amount 1000000000
-  
-  # Check user position in pool
-  %(prog)s user-info --pool EQA-X_yo... --wallet EQAT...
-  
-  # Check transaction status
+  # Check position & status
+  %(prog)s user-info --pool EQA-X... --wallet EQAT...
   %(prog)s tx-status --query-id 1697643564986267
-  
-  # LP positions (via TonAPI)
-  %(prog)s positions --wallet EQD...xyz
 
-Protocols (16): tonstakers, stakee, bemo, bemo_v2, hipo, kton, stonfi,
-                stonfi_v2, dedust, tonco, evaa, storm_trade, torch_finance,
-                dao_lama_vault, bidask, coffee
-
-Deposit/Withdraw support: stonfi_v2, dedust, tonco (DEX pools only)
-                          stonfi v1 only supports withdraw
-                          Staking pools (tonstakers, etc.) not supported
+Protocol support:
+  DEX (deposit/withdraw):      stonfi_v2, dedust, tonco
+  Liquid staking (stake/unstake): tonstakers, bemo, bemo_v2, hipo, kton, stakee
+  Lending (lend-deposit/withdraw): evaa
 """,
     )
 
@@ -1032,6 +1232,30 @@ Deposit/Withdraw support: stonfi_v2, dedust, tonco (DEX pools only)
     with_p.add_argument("--pool", "-p", required=True, help="Pool address")
     with_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
     with_p.add_argument("--lp-amount", "-l", required=True, help="LP tokens to burn (min units)")
+    
+    # --- stake (liquid staking) ---
+    stake_p = subparsers.add_parser("stake", help="Stake to liquid staking pool (tonstakers, bemo, etc.)")
+    stake_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    stake_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
+    stake_p.add_argument("--amount", "-a", required=True, help="Amount to stake (min units)")
+    
+    # --- unstake (liquid staking) ---
+    unstake_p = subparsers.add_parser("unstake", help="Unstake from liquid staking pool")
+    unstake_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    unstake_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
+    unstake_p.add_argument("--amount", "-a", required=True, help="Amount to unstake (min units)")
+    
+    # --- lend-deposit (lending) ---
+    lend_dep_p = subparsers.add_parser("lend-deposit", help="Deposit to lending protocol (evaa)")
+    lend_dep_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    lend_dep_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
+    lend_dep_p.add_argument("--amount", "-a", required=True, help="Amount to deposit (min units)")
+    
+    # --- lend-withdraw (lending) ---
+    lend_with_p = subparsers.add_parser("lend-withdraw", help="Withdraw from lending protocol")
+    lend_with_p.add_argument("--pool", "-p", required=True, help="Pool address")
+    lend_with_p.add_argument("--wallet", "-w", required=True, help="User wallet address")
+    lend_with_p.add_argument("--amount", "-a", required=True, help="Amount to withdraw (min units)")
     
     # --- user-info ---
     uinfo_p = subparsers.add_parser("user-info", help="Get user position in pool")
@@ -1097,6 +1321,34 @@ Deposit/Withdraw support: stonfi_v2, dedust, tonco (DEX pools only)
                 pool_address=args.pool,
                 user_address=args.wallet,
                 lp_amount=args.lp_amount,
+            )
+        
+        elif args.command == "stake":
+            result = stake_liquidity(
+                pool_address=args.pool,
+                user_address=args.wallet,
+                amount=args.amount,
+            )
+        
+        elif args.command == "unstake":
+            result = unstake_liquidity(
+                pool_address=args.pool,
+                user_address=args.wallet,
+                amount=args.amount,
+            )
+        
+        elif args.command == "lend-deposit":
+            result = lending_deposit(
+                pool_address=args.pool,
+                user_address=args.wallet,
+                amount=args.amount,
+            )
+        
+        elif args.command == "lend-withdraw":
+            result = lending_withdraw(
+                pool_address=args.pool,
+                user_address=args.wallet,
+                amount=args.amount,
             )
         
         elif args.command == "user-info":
