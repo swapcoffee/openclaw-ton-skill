@@ -413,7 +413,7 @@ def build_stake_tx(
     Args:
         pool_address: Адрес пула
         wallet_address: Адрес кошелька
-        amount: Сумма для стейкинга
+        amount: Сумма для стейкинга (в TON, не наноТОН)
 
     Returns:
         dict с транзакцией
@@ -421,12 +421,18 @@ def build_stake_tx(
     pool_safe = _make_url_safe(pool_address)
     wallet_safe = _make_url_safe(wallet_address)
 
+    # Конвертируем в наноТОН для API
+    amount_nano = int(amount * 1e9)
+
+    # Правильный формат API: request_data с yieldTypeResolver
     result = swap_coffee_request(
         f"/yield/pool/{pool_safe}/{wallet_safe}",
         method="POST",
         json_data={
-            "action": "provide",  # or "stake" for some protocols
-            "input_amount": amount,
+            "request_data": {
+                "yieldTypeResolver": "liquid_staking_stake",
+                "amount": str(amount_nano),
+            }
         }
     )
 
@@ -438,14 +444,27 @@ def build_stake_tx(
 
     data = result["data"]
 
+    # API возвращает массив транзакций
+    transactions = data if isinstance(data, list) else data.get("transactions", [data])
+    
+    # Преобразуем формат ответа для execute_staking_tx
+    normalized_txs = []
+    for tx in transactions:
+        msg = tx.get("message", {})
+        normalized_txs.append({
+            "address": msg.get("address"),
+            "value": msg.get("value"),
+            "cell": msg.get("payload_cell"),
+        })
+
     return {
         "success": True,
         "action": "stake",
         "pool_address": pool_address,
         "wallet_address": wallet_address,
         "amount": amount,
-        "transactions": data.get("transactions", []),
-        "query_id": data.get("query_id"),
+        "transactions": normalized_txs,
+        "query_id": transactions[0].get("query_id") if transactions else None,
         "raw_response": data
     }
 
@@ -462,7 +481,7 @@ def build_unstake_tx(
     Args:
         pool_address: Адрес пула
         wallet_address: Адрес кошелька
-        amount: Сумма для вывода (None = всё)
+        amount: Сумма для вывода в TON (None = всё)
         close_position: Закрыть позицию полностью
 
     Returns:
@@ -471,19 +490,22 @@ def build_unstake_tx(
     pool_safe = _make_url_safe(pool_address)
     wallet_safe = _make_url_safe(wallet_address)
 
-    json_data = {
-        "action": "withdraw",  # or "unstake" / "close" for some protocols
+    # Правильный формат API: request_data с yieldTypeResolver
+    request_data = {
+        "yieldTypeResolver": "liquid_staking_unstake",
     }
 
     if close_position:
-        json_data["close_position"] = True
+        request_data["close_position"] = True
     elif amount:
-        json_data["output_amount"] = amount
+        # Конвертируем в наноТОН
+        amount_nano = int(amount * 1e9)
+        request_data["amount"] = str(amount_nano)
 
     result = swap_coffee_request(
         f"/yield/pool/{pool_safe}/{wallet_safe}",
         method="POST",
-        json_data=json_data
+        json_data={"request_data": request_data}
     )
 
     if not result["success"]:
@@ -494,6 +516,19 @@ def build_unstake_tx(
 
     data = result["data"]
 
+    # API возвращает массив транзакций
+    transactions = data if isinstance(data, list) else data.get("transactions", [data])
+    
+    # Преобразуем формат ответа для execute_staking_tx
+    normalized_txs = []
+    for tx in transactions:
+        msg = tx.get("message", {})
+        normalized_txs.append({
+            "address": msg.get("address"),
+            "value": msg.get("value"),
+            "cell": msg.get("payload_cell"),
+        })
+
     return {
         "success": True,
         "action": "unstake",
@@ -501,8 +536,8 @@ def build_unstake_tx(
         "wallet_address": wallet_address,
         "amount": amount,
         "close_position": close_position,
-        "transactions": data.get("transactions", []),
-        "query_id": data.get("query_id"),
+        "transactions": normalized_txs,
+        "query_id": transactions[0].get("query_id") if transactions else None,
         "raw_response": data
     }
 
