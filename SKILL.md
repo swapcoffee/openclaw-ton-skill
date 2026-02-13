@@ -145,6 +145,47 @@ python wallet.py export trading
 python wallet.py remove old-wallet
 ```
 
+### Create Vanity Wallet
+
+Generate a wallet with a custom address pattern (e.g., address containing "CAFE", "TON", "777"):
+
+```bash
+# Address starts with EQ + pattern (after the EQ prefix)
+python wallet.py create-vanity --prefix "CAFE" --label "cafe-wallet"
+
+# Address contains pattern anywhere
+python wallet.py create-vanity --contains "TON" --label "ton-wallet"
+
+# Address ends with pattern
+python wallet.py create-vanity --suffix "777" --label "lucky"
+
+# Case-sensitive matching (slower)
+python wallet.py create-vanity --prefix "ABC" --case-sensitive --label "abc-wallet"
+
+# Custom thread count and timeout
+python wallet.py create-vanity --contains "DEAD" --threads 8 --timeout 7200 --label "dead-wallet"
+```
+
+**Options:**
+- `--prefix` — Address starts with EQ + pattern
+- `--contains` — Address contains pattern anywhere
+- `--suffix` — Address ends with pattern
+- `--case-sensitive` — Exact case match (default: case-insensitive)
+- `--threads` — Worker processes (default: CPU count)
+- `--timeout` — Max search time in seconds (default: 3600 = 1 hour)
+- `--label` — Wallet label
+
+**Difficulty Estimates:**
+| Pattern Length | Difficulty | Estimated Time |
+|---------------|------------|----------------|
+| 2 chars | Trivial | < 1 second |
+| 3 chars | Easy | seconds |
+| 4 chars | Medium | minutes |
+| 5 chars | Hard | hours |
+| 6+ chars | Extreme | days+ |
+
+⚠️ Only base64url characters allowed: `A-Za-z0-9-_`
+
 ---
 
 ## Transfers

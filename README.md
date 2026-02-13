@@ -58,6 +58,7 @@ A proof-of-concept for AI-driven open source development. The future is here. �
 
 ### 💼 Wallet Management
 - Create new TON wallets (V3R2, V4R2, V5R1)
+- **Vanity address generation** (custom address patterns via brute-force)
 - Import wallets via 24-word mnemonic
 - Encrypted local storage (AES-256)
 - Multi-wallet support with labels
@@ -198,7 +199,15 @@ python wallet.py create --label "main"
 # ⚠️ Save the mnemonic phrase! Shown only once.
 ```
 
-### 2. Check Balance
+### 2. Create Vanity Wallet (Optional)
+
+```bash
+# Create wallet with "TON" in address
+python wallet.py create-vanity --contains "TON" --label "ton-vanity"
+# ⚠️ Longer patterns take exponentially longer to find!
+```
+
+### 3. Check Balance
 
 ```bash
 python wallet.py balance main --full
@@ -307,6 +316,7 @@ All test cases can be run from the `scripts/` directory.
 | ID | Test Case | Command | Expected Output | Status |
 |----|-----------|---------|-----------------|--------|
 | **TC-001** | Create wallet | `python wallet.py create --label test-wallet` | New wallet with 24-word mnemonic | ✅ Pass |
+| **TC-001a** | Create vanity wallet | `python wallet.py create-vanity --contains "AB" --label vanity-test` | Wallet with "AB" in address | ✅ Pass |
 | **TC-002** | List wallets | `python wallet.py list` | JSON array with wallet labels and addresses | ✅ Pass |
 | **TC-003** | Check balance | `python wallet.py balance test-wallet` | TON balance in JSON format | ✅ Pass |
 | **TC-004** | Check balance with jettons | `python wallet.py balance test-wallet --full` | TON + all jetton balances | ✅ Pass |
@@ -414,6 +424,7 @@ ruff check scripts/
 - [x] Limit order support ✅
 - [x] Staking operations ✅
 - [x] Profile, cashback, referrals ✅
+- [x] Vanity address generation ✅
 - [ ] Additional DEX integrations
 - [ ] Multi-language support
 - [ ] Web dashboard
