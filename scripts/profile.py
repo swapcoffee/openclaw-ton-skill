@@ -526,6 +526,47 @@ def get_profile_settings(
     }
 
 
+def get_cashback_info(wallet_address: str) -> dict:
+    """
+    Get cashback information for wallet.
+    
+    GET /v1/cashback/{wallet_address}
+    
+    Args:
+        wallet_address: User wallet address
+    
+    Returns:
+        dict with cashback info
+    """
+    if not is_valid_address(wallet_address):
+        return {"success": False, "error": f"Invalid wallet address: {wallet_address}"}
+    
+    addr_safe = _make_url_safe(wallet_address)
+    
+    result = swap_coffee_request(f"/cashback/{addr_safe}")
+    
+    if result["success"]:
+        return {
+            "success": True,
+            "wallet": wallet_address,
+            "cashback": result["data"],
+        }
+    
+    # Handle 404 specifically
+    if result.get("status_code") == 404:
+        return {
+            "success": False,
+            "error": "Cashback information not found for this wallet",
+            "status_code": 404,
+        }
+    
+    return {
+        "success": False,
+        "error": result.get("error", "Failed to get cashback info"),
+        "status_code": result.get("status_code"),
+    }
+
+
 def update_profile_settings(
     wallet_address: str,
     settings: dict,
@@ -654,6 +695,9 @@ API Categories:
     ps_p = subparsers.add_parser("profile-settings", help="Get profile settings")
     ps_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
     
+    cb_p = subparsers.add_parser("cashback-info", help="Get cashback information")
+    cb_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -701,6 +745,8 @@ API Categories:
             )
         elif args.command == "profile-settings":
             result = get_profile_settings(wallet_address=args.wallet)
+        elif args.command == "cashback-info":
+            result = get_cashback_info(wallet_address=args.wallet)
         
         else:
             result = {"success": False, "error": f"Unknown command: {args.command}"}
