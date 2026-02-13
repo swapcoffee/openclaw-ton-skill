@@ -122,7 +122,8 @@ def get_yield_pools(
     token: Optional[str] = None,
     protocol: Optional[str] = None,
     limit: int = 50,
-    offset: int = 0,
+    page: int = 1,
+    fetch_all: bool = False,
 ) -> dict:
     """
     Получает список yield пулов.
@@ -132,21 +133,60 @@ def get_yield_pools(
         min_tvl: Минимальный TVL
         token: Фильтр по токену
         protocol: Фильтр по протоколу (stonfi, dedust, etc.)
-        limit: Максимум результатов
-        offset: Смещение для пагинации
+        limit: Максимум результатов (max 100 per page)
+        page: Номер страницы (1-indexed)
+        fetch_all: Получить все пулы (все страницы)
 
     Returns:
         dict с пулами
     """
-    params = {"limit": limit, "offset": offset}
+    # API использует size + page для пагинации (max size = 100)
+    page_size = min(limit, 100)
     
-    # API поддерживает sort параметр
-    if sort_by:
-        params["sort"] = sort_by
+    if fetch_all:
+        # Fetch all pages
+        all_pools = []
+        current_page = 1
+        total_count = 0
+        
+        while True:
+            params = {"size": 100, "page": current_page}
+            if sort_by:
+                params["sort"] = sort_by
+            
+            result = swap_coffee_request("/yield/pools", params=params)
+            
+            if not result["success"]:
+                break
+            
+            data = result["data"]
+            if isinstance(data, list) and len(data) > 0:
+                data = data[0]
+            
+            total_count = data.get("total_count", 0) if isinstance(data, dict) else 0
+            pools = data.get("pools", []) if isinstance(data, dict) else []
+            
+            if not pools:
+                break
+            
+            all_pools.extend(pools)
+            current_page += 1
+            
+            # Safety limit
+            if current_page > 50:  # Max 5000 pools
+                break
+        
+        pools = all_pools
+    else:
+        params = {"size": page_size, "page": page}
+        if sort_by:
+            params["sort"] = sort_by
 
-    result = swap_coffee_request("/yield/pools", params=params)
+        result = swap_coffee_request("/yield/pools", params=params)
 
-    if result["success"]:
+        if not result["success"]:
+            return _get_pools_fallback(sort_by, min_tvl, token, limit)
+        
         data = result["data"]
         
         # Ответ может быть: [{total_count: N, pools: [...]}] или {total_count: N, pools: [...]}
@@ -155,52 +195,58 @@ def get_yield_pools(
         
         total_count = data.get("total_count", 0) if isinstance(data, dict) else 0
         pools = data.get("pools", []) if isinstance(data, dict) else []
+    
+    if not isinstance(pools, list):
+        pools = []
+
+    # Нормализуем данные
+    normalized = []
+    for pool in pools:
+        norm_pool = _normalize_pool(pool)
         
-        if not isinstance(pools, list):
-            pools = []
+        # Фильтр по протоколу
+        if protocol:
+            if norm_pool.get("protocol", "").lower() != protocol.lower():
+                continue
+        
+        # Фильтр по минимальному TVL
+        if min_tvl:
+            pool_tvl = norm_pool.get("tvl_usd", 0) or 0
+            if pool_tvl < min_tvl:
+                continue
+        
+        # Фильтр по токену
+        if token:
+            token_upper = token.upper()
+            tokens = norm_pool.get("tokens", [])
+            token_symbols = [t.get("symbol", "").upper() for t in tokens]
+            if token_upper not in token_symbols:
+                continue
+        
+        normalized.append(norm_pool)
 
-        # Нормализуем данные
-        normalized = []
-        for pool in pools:
-            norm_pool = _normalize_pool(pool)
-            
-            # Фильтр по протоколу
-            if protocol:
-                if norm_pool.get("protocol", "").lower() != protocol.lower():
-                    continue
-            
-            # Фильтр по минимальному TVL
-            if min_tvl:
-                pool_tvl = norm_pool.get("tvl_usd", 0) or 0
-                if pool_tvl < min_tvl:
-                    continue
-            
-            # Фильтр по токену
-            if token:
-                token_upper = token.upper()
-                tokens = norm_pool.get("tokens", [])
-                token_symbols = [t.get("symbol", "").upper() for t in tokens]
-                if token_upper not in token_symbols:
-                    continue
-            
-            normalized.append(norm_pool)
+    # Сортируем локально если был фильтр
+    if sort_by == "apr":
+        normalized.sort(key=lambda x: x.get("apr", 0) or 0, reverse=True)
+    elif sort_by == "tvl":
+        normalized.sort(key=lambda x: x.get("tvl_usd", 0) or 0, reverse=True)
+    elif sort_by == "volume":
+        normalized.sort(key=lambda x: x.get("volume_usd", 0) or 0, reverse=True)
 
-        # Сортируем локально если был фильтр
-        if sort_by == "apr":
-            normalized.sort(key=lambda x: x.get("apr", 0) or 0, reverse=True)
-        elif sort_by == "tvl":
-            normalized.sort(key=lambda x: x.get("tvl_usd", 0) or 0, reverse=True)
-        elif sort_by == "volume":
-            normalized.sort(key=lambda x: x.get("volume_usd", 0) or 0, reverse=True)
-
-        return {
-            "success": True,
-            "source": "swap.coffee",
-            "total_count": total_count,
-            "pools_count": len(normalized),
-            "protocols": SUPPORTED_PROTOCOLS,
-            "pools": normalized[:limit],
-        }
+    # Apply limit
+    result_pools = normalized[:limit] if not fetch_all else normalized
+    
+    return {
+        "success": True,
+        "source": "swap.coffee",
+        "total_count": total_count,
+        "page": page if not fetch_all else "all",
+        "page_size": page_size if not fetch_all else 100,
+        "pools_count": len(result_pools),
+        "pools_filtered": len(normalized),
+        "protocols": SUPPORTED_PROTOCOLS,
+        "pools": result_pools,
+    }
 
     # Fallback: получаем данные из DeDust API
     return _get_pools_fallback(sort_by, min_tvl, token, limit)
@@ -628,12 +674,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Список пулов
+  # Список пулов (2000 total, 100 max per page)
   %(prog)s pools --sort apr
   %(prog)s pools --sort tvl --min-tvl 1000000
   %(prog)s pools --token TON --limit 10
   %(prog)s pools --protocol stonfi
   %(prog)s pools --protocol dedust --sort apr
+  %(prog)s pools --page 5 --limit 100
+  %(prog)s pools --all  # fetch all 2000 pools (slow)
   
   # Детали пула
   %(prog)s pool --id EQD...abc
@@ -649,6 +697,8 @@ Supported protocols (16):
   stonfi, stonfi_v2, dedust, tonco, evaa, tonstakers, stakee, bemo,
   bemo_v2, hipo, kton, storm_trade, torch_finance, dao_lama_vault, bidask, coffee
 
+Total pools: 2000 | Max per page: 100 | Pagination: --page N
+
 Risk levels: low, medium, high
 
 Note: Deposit/withdraw not supported via API — requires direct DEX contract interaction.
@@ -658,7 +708,7 @@ Note: Deposit/withdraw not supported via API — requires direct DEX contract in
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # --- pools ---
-    pools_p = subparsers.add_parser("pools", help="List yield pools (2000+ pools from 16 protocols)")
+    pools_p = subparsers.add_parser("pools", help="List yield pools (2000 pools from 16 protocols)")
     pools_p.add_argument(
         "--sort", "-s", default="apr", choices=["apr", "tvl", "volume"], help="Sort by"
     )
@@ -669,8 +719,9 @@ Note: Deposit/withdraw not supported via API — requires direct DEX contract in
         choices=SUPPORTED_PROTOCOLS,
         help="Filter by protocol"
     )
-    pools_p.add_argument("--limit", "-l", type=int, default=20, help="Max results")
-    pools_p.add_argument("--offset", type=int, default=0, help="Offset for pagination")
+    pools_p.add_argument("--limit", "-l", type=int, default=20, help="Max results per page (max 100)")
+    pools_p.add_argument("--page", "-p", type=int, default=1, help="Page number (1-indexed)")
+    pools_p.add_argument("--all", "-a", action="store_true", help="Fetch all 2000 pools (slow)")
 
     # --- pool ---
     pool_p = subparsers.add_parser("pool", help="Pool details")
@@ -724,7 +775,8 @@ Note: Deposit/withdraw not supported via API — requires direct DEX contract in
                 token=args.token,
                 protocol=args.protocol,
                 limit=args.limit,
-                offset=args.offset,
+                page=args.page,
+                fetch_all=getattr(args, "all", False),
             )
 
         elif args.command == "pool":
