@@ -32,6 +32,7 @@ from dyor import (
     get_dyor_api_key,
     KNOWN_TOKENS,
 )
+from tokens import get_token_market_data, get_jetton_info
 
 
 # =============================================================================
@@ -42,6 +43,9 @@ from dyor import (
 def get_full_token_info(token: str) -> dict:
     """
     Получает полную информацию о токене (агрегация из разных источников).
+
+    Uses swap.coffee Tokens API as primary source for market data,
+    with DYOR/TonAPI as fallback.
 
     Args:
         token: Символ токена или адрес
@@ -57,34 +61,43 @@ def get_full_token_info(token: str) -> dict:
     # Trust score
     trust = get_trust_score(token)
 
-    # Объединяем
+    # Try swap.coffee Tokens API for better market stats
+    tokens_api_data = {}
+    try:
+        tokens_result = get_token_market_data(token_address)
+        if tokens_result.get("success"):
+            tokens_api_data = tokens_result
+    except Exception:
+        pass
+
+    # Объединяем (swap.coffee > DYOR > TonAPI)
     result = {
-        "success": info.get("success", False),
+        "success": info.get("success", False) or bool(tokens_api_data),
         "token": token,
         "address": token_address,
-        "sources": [info.get("source"), trust.get("source")],
+        "sources": [s for s in [info.get("source"), trust.get("source"), "swap.coffee" if tokens_api_data else None] if s],
         # Metadata
-        "name": info.get("name"),
-        "symbol": info.get("symbol"),
+        "name": tokens_api_data.get("name") or info.get("name"),
+        "symbol": tokens_api_data.get("symbol") or info.get("symbol"),
         "decimals": info.get("decimals"),
         "image": info.get("image"),
         "description": info.get("description"),
-        # Market data
-        "price_usd": info.get("price_usd"),
-        "price_change_24h": info.get("price_change_24h"),
-        "market_cap": info.get("market_cap"),
-        "fully_diluted_mcap": info.get("fully_diluted_mcap"),
-        "volume_24h": info.get("volume_24h"),
-        "liquidity": info.get("liquidity"),
+        # Market data (prefer swap.coffee)
+        "price_usd": tokens_api_data.get("price_usd") or info.get("price_usd"),
+        "price_change_24h": tokens_api_data.get("price_change_24h") or info.get("price_change_24h"),
+        "market_cap": tokens_api_data.get("mcap") or info.get("market_cap"),
+        "fully_diluted_mcap": tokens_api_data.get("fdmc") or info.get("fully_diluted_mcap"),
+        "volume_24h": tokens_api_data.get("volume_usd_24h") or info.get("volume_24h"),
+        "liquidity": tokens_api_data.get("tvl_usd") or info.get("liquidity"),
         # Supply
         "total_supply": info.get("total_supply"),
         "circulating_supply": info.get("circulating_supply"),
-        "holders_count": info.get("holders_count"),
+        "holders_count": tokens_api_data.get("holders_count") or info.get("holders_count"),
         "mintable": info.get("mintable"),
-        # Trust
-        "trust_score": trust.get("trust_score"),
+        # Trust (prefer swap.coffee trust_score)
+        "trust_score": tokens_api_data.get("trust_score") or trust.get("trust_score"),
         "trust_level": trust.get("trust_level"),
-        "verification": info.get("verification") or trust.get("verification"),
+        "verification": tokens_api_data.get("verification") or info.get("verification") or trust.get("verification"),
         "warnings": trust.get("warnings", []),
         "flags": trust.get("flags", []),
         # Links

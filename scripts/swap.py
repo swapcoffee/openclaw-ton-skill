@@ -25,6 +25,7 @@ sys.path.insert(0, str(script_dir))
 
 from utils import api_request, tonapi_request, load_config, is_valid_address
 from wallet import WalletStorage
+from tokens import resolve_token_by_symbol, get_token_market_data
 
 
 def _make_url_safe(address: str) -> str:
@@ -135,8 +136,13 @@ def resolve_token_address(token: str) -> str:
     if is_valid_address(token) or ":" in token:
         return token
 
-    # Пробуем найти через API
-    # TODO: добавить lookup через TonAPI или swap.coffee
+    # Пробуем найти через swap.coffee Tokens API
+    try:
+        resolved = resolve_token_by_symbol(token)
+        if resolved and resolved.get("address"):
+            return resolved["address"]
+    except Exception:
+        pass
 
     return token
 
