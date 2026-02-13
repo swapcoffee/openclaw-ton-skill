@@ -3,15 +3,15 @@
 OpenClaw TON Skill — Yield/DeFi CLI
 
 Работа с пулами ликвидности через swap.coffee v1 API:
-- Список 2000+ пулов из 16 протоколов
+- 2000 пулов из 16 протоколов
 - Детали пула (TVL, APR, объёмы)
 - Рекомендации по выбору пула
 
-Протоколы: stonfi, stonfi_v2, dedust, tonco, evaa, tonstakers, stakee, bemo,
-           bemo_v2, hipo, kton, storm_trade, torch_finance, dao_lama_vault, bidask, coffee
+Протоколы: tonstakers, stakee, bemo, bemo_v2, hipo, kton, stonfi, stonfi_v2,
+           dedust, tonco, evaa, storm_trade, torch_finance, dao_lama_vault, bidask, coffee
 
-Примечание: Депозит/вывод ликвидности требует прямого взаимодействия с контрактами DEX
-и не поддерживается через API (read-only aggregator).
+Примечание: API не поддерживает серверные фильтры — все фильтры применяются клиентски.
+Депозит/вывод ликвидности требует прямого взаимодействия с контрактами DEX.
 
 Документация: https://docs.swap.coffee/technical-guides/aggregator-api/yield-internals
 """
@@ -19,9 +19,10 @@ OpenClaw TON Skill — Yield/DeFi CLI
 import os
 import sys
 import json
+import time
 import argparse
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 # Локальный импорт
 script_dir = Path(__file__).parent
@@ -43,8 +44,8 @@ SWAP_COFFEE_API = "https://backend.swap.coffee"
 
 # Поддерживаемые протоколы (16)
 SUPPORTED_PROTOCOLS = [
-    "stonfi", "stonfi_v2", "dedust", "tonco", "evaa", "tonstakers",
-    "stakee", "bemo", "bemo_v2", "hipo", "kton", "storm_trade",
+    "tonstakers", "stakee", "bemo", "bemo_v2", "hipo", "kton",
+    "stonfi", "stonfi_v2", "dedust", "tonco", "evaa", "storm_trade",
     "torch_finance", "dao_lama_vault", "bidask", "coffee"
 ]
 
@@ -54,24 +55,63 @@ RISK_PROFILES = {
         "min_tvl": 1_000_000,
         "max_il_risk": 0.05,
         "stable_pairs_only": True,
-        "min_age_days": 30,
     },
     "medium": {
         "min_tvl": 100_000,
         "max_il_risk": 0.15,
         "stable_pairs_only": False,
-        "min_age_days": 7,
     },
     "high": {
         "min_tvl": 10_000,
         "max_il_risk": 1.0,
         "stable_pairs_only": False,
-        "min_age_days": 1,
     },
 }
 
 # Stable tokens
 STABLE_TOKENS = ["USDT", "USDC", "DAI", "TUSD", "jUSDT", "jUSDC"]
+
+# Cache settings
+CACHE_FILE = Path.home() / ".openclaw" / "ton-skill" / "yield_pools_cache.json"
+CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+# =============================================================================
+# Cache
+# =============================================================================
+
+
+def _load_cache() -> Optional[Dict]:
+    """Загружает кэш пулов если он свежий."""
+    if not CACHE_FILE.exists():
+        return None
+    
+    try:
+        with open(CACHE_FILE, "r") as f:
+            cache = json.load(f)
+        
+        cached_at = cache.get("cached_at", 0)
+        if time.time() - cached_at > CACHE_TTL_SECONDS:
+            return None  # Cache expired
+        
+        return cache
+    except Exception:
+        return None
+
+
+def _save_cache(pools: List[Dict], total_count: int) -> None:
+    """Сохраняет пулы в кэш."""
+    try:
+        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cache = {
+            "cached_at": time.time(),
+            "total_count": total_count,
+            "pools": pools,
+        }
+        with open(CACHE_FILE, "w") as f:
+            json.dump(cache, f)
+    except Exception:
+        pass  # Ignore cache write errors
 
 
 # =============================================================================
@@ -116,140 +156,46 @@ def swap_coffee_request(
 # =============================================================================
 
 
-def get_yield_pools(
-    sort_by: str = "apr",
-    min_tvl: Optional[float] = None,
-    token: Optional[str] = None,
-    protocol: Optional[str] = None,
-    limit: int = 50,
-    page: int = 1,
-    fetch_all: bool = False,
-) -> dict:
+def _fetch_all_pools() -> tuple[List[Dict], int]:
     """
-    Получает список yield пулов.
-
-    Args:
-        sort_by: Сортировка (apr, tvl, volume)
-        min_tvl: Минимальный TVL
-        token: Фильтр по токену
-        protocol: Фильтр по протоколу (stonfi, dedust, etc.)
-        limit: Максимум результатов (max 100 per page)
-        page: Номер страницы (1-indexed)
-        fetch_all: Получить все пулы (все страницы)
-
-    Returns:
-        dict с пулами
-    """
-    # API использует size + page для пагинации (max size = 100)
-    page_size = min(limit, 100)
+    Загружает все 2000 пулов (20 страниц по 100).
+    Использует кэш если доступен.
     
-    if fetch_all:
-        # Fetch all pages
-        all_pools = []
-        current_page = 1
-        total_count = 0
+    Returns:
+        (pools, total_count)
+    """
+    # Check cache first
+    cache = _load_cache()
+    if cache:
+        return cache["pools"], cache["total_count"]
+    
+    all_pools = []
+    total_count = 2000
+    
+    # Fetch all 20 pages (limit=100, max per page)
+    for page in range(1, 21):
+        result = swap_coffee_request("/yield/pools", params={"page": page, "limit": 100})
         
-        while True:
-            params = {"size": 100, "page": current_page}
-            if sort_by:
-                params["sort"] = sort_by
-            
-            result = swap_coffee_request("/yield/pools", params=params)
-            
-            if not result["success"]:
-                break
-            
-            data = result["data"]
-            if isinstance(data, list) and len(data) > 0:
-                data = data[0]
-            
-            total_count = data.get("total_count", 0) if isinstance(data, dict) else 0
-            pools = data.get("pools", []) if isinstance(data, dict) else []
-            
-            if not pools:
-                break
-            
-            all_pools.extend(pools)
-            current_page += 1
-            
-            # Safety limit
-            if current_page > 50:  # Max 5000 pools
-                break
-        
-        pools = all_pools
-    else:
-        params = {"size": page_size, "page": page}
-        if sort_by:
-            params["sort"] = sort_by
-
-        result = swap_coffee_request("/yield/pools", params=params)
-
         if not result["success"]:
-            return _get_pools_fallback(sort_by, min_tvl, token, limit)
+            break
         
         data = result["data"]
-        
-        # Ответ может быть: [{total_count: N, pools: [...]}] или {total_count: N, pools: [...]}
         if isinstance(data, list) and len(data) > 0:
-            data = data[0]  # API возвращает список с одним элементом
+            data = data[0]
         
-        total_count = data.get("total_count", 0) if isinstance(data, dict) else 0
+        total_count = data.get("total_count", 2000) if isinstance(data, dict) else 2000
         pools = data.get("pools", []) if isinstance(data, dict) else []
+        
+        if not pools:
+            break
+        
+        all_pools.extend(pools)
     
-    if not isinstance(pools, list):
-        pools = []
-
-    # Нормализуем данные
-    normalized = []
-    for pool in pools:
-        norm_pool = _normalize_pool(pool)
-        
-        # Фильтр по протоколу
-        if protocol:
-            if norm_pool.get("protocol", "").lower() != protocol.lower():
-                continue
-        
-        # Фильтр по минимальному TVL
-        if min_tvl:
-            pool_tvl = norm_pool.get("tvl_usd", 0) or 0
-            if pool_tvl < min_tvl:
-                continue
-        
-        # Фильтр по токену
-        if token:
-            token_upper = token.upper()
-            tokens = norm_pool.get("tokens", [])
-            token_symbols = [t.get("symbol", "").upper() for t in tokens]
-            if token_upper not in token_symbols:
-                continue
-        
-        normalized.append(norm_pool)
-
-    # Сортируем локально если был фильтр
-    if sort_by == "apr":
-        normalized.sort(key=lambda x: x.get("apr", 0) or 0, reverse=True)
-    elif sort_by == "tvl":
-        normalized.sort(key=lambda x: x.get("tvl_usd", 0) or 0, reverse=True)
-    elif sort_by == "volume":
-        normalized.sort(key=lambda x: x.get("volume_usd", 0) or 0, reverse=True)
-
-    # Apply limit
-    result_pools = normalized[:limit] if not fetch_all else normalized
+    # Save to cache
+    if all_pools:
+        _save_cache(all_pools, total_count)
     
-    return {
-        "success": True,
-        "source": "swap.coffee",
-        "total_count": total_count,
-        "page": page if not fetch_all else "all",
-        "page_size": page_size if not fetch_all else 100,
-        "pools_count": len(result_pools),
-        "pools_filtered": len(normalized),
-        "protocols": SUPPORTED_PROTOCOLS,
-        "pools": result_pools,
-    }
-
-    # Fallback: получаем данные из DeDust API
-    return _get_pools_fallback(sort_by, min_tvl, token, limit)
+    return all_pools, total_count
 
 
 def _normalize_pool(pool: dict) -> dict:
@@ -351,6 +297,162 @@ def _estimate_il_risk(token_symbols: List[str]) -> float:
     return 0.25
 
 
+def _filter_pools(
+    pools: List[Dict],
+    protocol: Optional[str] = None,
+    token: Optional[str] = None,
+    min_tvl: Optional[float] = None,
+    trusted_only: bool = False,
+) -> List[Dict]:
+    """Применяет клиентские фильтры к пулам."""
+    filtered = []
+    
+    for pool in pools:
+        # Фильтр по протоколу
+        if protocol:
+            if pool.get("protocol", "").lower() != protocol.lower():
+                continue
+        
+        # Фильтр по trusted
+        if trusted_only:
+            if not pool.get("is_trusted", False):
+                continue
+        
+        # Фильтр по минимальному TVL
+        if min_tvl:
+            pool_tvl = pool.get("tvl_usd", 0) or 0
+            if pool_tvl < min_tvl:
+                continue
+        
+        # Фильтр по токену
+        if token:
+            token_upper = token.upper()
+            tokens = pool.get("tokens", [])
+            token_symbols = [t.get("symbol", "").upper() for t in tokens]
+            if token_upper not in token_symbols:
+                continue
+        
+        filtered.append(pool)
+    
+    return filtered
+
+
+def _sort_pools(pools: List[Dict], sort_by: str) -> List[Dict]:
+    """Сортирует пулы."""
+    if sort_by == "apr":
+        return sorted(pools, key=lambda x: x.get("apr", 0) or 0, reverse=True)
+    elif sort_by == "tvl":
+        return sorted(pools, key=lambda x: x.get("tvl_usd", 0) or 0, reverse=True)
+    elif sort_by == "volume":
+        return sorted(pools, key=lambda x: x.get("volume_usd", 0) or 0, reverse=True)
+    return pools
+
+
+def get_yield_pools(
+    sort_by: str = "apr",
+    min_tvl: Optional[float] = None,
+    token: Optional[str] = None,
+    protocol: Optional[str] = None,
+    trusted_only: bool = False,
+    limit: int = 20,
+    page: int = 1,
+    fetch_all: bool = False,
+) -> dict:
+    """
+    Получает список yield пулов.
+
+    API не поддерживает серверные фильтры — все фильтры клиентские.
+    Для фильтрации/рекомендаций загружаются все 2000 пулов (с кэшированием).
+
+    Args:
+        sort_by: Сортировка (apr, tvl, volume)
+        min_tvl: Минимальный TVL (client-side filter)
+        token: Фильтр по токену (client-side filter)
+        protocol: Фильтр по протоколу (client-side filter)
+        trusted_only: Только trusted пулы (client-side filter)
+        limit: Результатов на странице
+        page: Номер страницы (1-indexed)
+        fetch_all: Вернуть все результаты без пагинации
+
+    Returns:
+        dict с пулами
+    """
+    # Если есть фильтры или fetch_all — загружаем все пулы
+    need_full_fetch = fetch_all or min_tvl or token or protocol or trusted_only
+    
+    if need_full_fetch:
+        raw_pools, total_count = _fetch_all_pools()
+        
+        # Нормализуем
+        normalized = [_normalize_pool(p) for p in raw_pools]
+        
+        # Фильтруем
+        filtered = _filter_pools(
+            normalized,
+            protocol=protocol,
+            token=token,
+            min_tvl=min_tvl,
+            trusted_only=trusted_only,
+        )
+        
+        # Сортируем
+        sorted_pools = _sort_pools(filtered, sort_by)
+        
+        # Пагинация
+        if fetch_all:
+            result_pools = sorted_pools
+            result_page = "all"
+        else:
+            start = (page - 1) * limit
+            end = start + limit
+            result_pools = sorted_pools[start:end]
+            result_page = page
+        
+        return {
+            "success": True,
+            "source": "swap.coffee",
+            "total_count": total_count,
+            "filtered_count": len(filtered),
+            "page": result_page,
+            "limit": limit,
+            "pools_count": len(result_pools),
+            "pools": result_pools,
+        }
+    
+    # Без фильтров — просто загружаем одну страницу
+    # API всегда возвращает до 100 записей, поэтому запрашиваем max(limit, 100)
+    # и затем обрезаем до нужного limit
+    fetch_limit = min(limit, 100)
+    result = swap_coffee_request("/yield/pools", params={"page": page, "limit": fetch_limit})
+    
+    if not result["success"]:
+        return _get_pools_fallback(sort_by, min_tvl, token, limit)
+    
+    data = result["data"]
+    if isinstance(data, list) and len(data) > 0:
+        data = data[0]
+    
+    total_count = data.get("total_count", 0) if isinstance(data, dict) else 0
+    pools = data.get("pools", []) if isinstance(data, dict) else []
+    
+    # Нормализуем и сортируем
+    normalized = [_normalize_pool(p) for p in pools]
+    sorted_pools = _sort_pools(normalized, sort_by)
+    
+    # Apply limit
+    result_pools = sorted_pools[:limit]
+    
+    return {
+        "success": True,
+        "source": "swap.coffee",
+        "total_count": total_count,
+        "page": page,
+        "limit": limit,
+        "pools_count": len(result_pools),
+        "pools": result_pools,
+    }
+
+
 def _get_pools_fallback(
     sort_by: str, min_tvl: Optional[float], token: Optional[str], limit: int
 ) -> dict:
@@ -395,33 +497,22 @@ def _get_pools_fallback(
                     "il_risk": _estimate_il_risk(token_symbols),
                 }
                 
-                # Фильтры
-                if min_tvl and norm["tvl_usd"] < min_tvl:
-                    continue
-                if token:
-                    token_upper = token.upper()
-                    if token_upper not in [s.upper() for s in token_symbols]:
-                        continue
-                
                 normalized.append(norm)
 
-            # Сортируем
-            if sort_by == "apr":
-                normalized.sort(key=lambda x: x.get("apr", 0) or 0, reverse=True)
-            elif sort_by == "tvl":
-                normalized.sort(key=lambda x: x.get("tvl_usd", 0) or 0, reverse=True)
+            # Фильтруем и сортируем
+            filtered = _filter_pools(normalized, min_tvl=min_tvl, token=token)
+            sorted_pools = _sort_pools(filtered, sort_by)
 
             return {
                 "success": True,
                 "source": "dedust",
-                "pools_count": len(normalized),
-                "pools": normalized[:limit],
+                "pools_count": len(sorted_pools),
+                "pools": sorted_pools[:limit],
             }
 
     return {
         "success": False,
         "error": "Failed to fetch pools from any source",
-        "note": "swap.coffee API may be unavailable",
     }
 
 
@@ -476,10 +567,14 @@ def get_pool_details(pool_address: str) -> dict:
 
 
 def recommend_pools(
-    token: Optional[str] = None, risk: str = "medium", amount: Optional[float] = None
+    token: Optional[str] = None,
+    risk: str = "medium",
+    amount: Optional[float] = None,
 ) -> dict:
     """
     Рекомендует пулы на основе критериев.
+    
+    Загружает все 2000 пулов для полного анализа.
 
     Args:
         token: Предпочтительный токен
@@ -491,23 +586,19 @@ def recommend_pools(
     """
     risk_profile = RISK_PROFILES.get(risk, RISK_PROFILES["medium"])
 
-    # Получаем пулы
-    pools_result = get_yield_pools(
-        sort_by="apr",
-        min_tvl=risk_profile["min_tvl"],
-        token=token,
-        limit=100,
-    )
-
-    if not pools_result["success"]:
-        return pools_result
-
-    pools = pools_result["pools"]
+    # Загружаем все пулы
+    raw_pools, total_count = _fetch_all_pools()
+    normalized = [_normalize_pool(p) for p in raw_pools]
 
     # Фильтруем по risk profile
     recommended = []
 
-    for pool in pools:
+    for pool in normalized:
+        # TVL filter
+        tvl = pool.get("tvl_usd", 0) or 0
+        if tvl < risk_profile["min_tvl"]:
+            continue
+        
         # IL риск
         if pool.get("il_risk", 1) > risk_profile["max_il_risk"]:
             continue
@@ -518,10 +609,17 @@ def recommend_pools(
             symbols = [t.get("symbol", "").upper() for t in tokens]
             if not any(s in STABLE_TOKENS for s in symbols):
                 continue
+        
+        # Token filter
+        if token:
+            token_upper = token.upper()
+            tokens = pool.get("tokens", [])
+            symbols = [t.get("symbol", "").upper() for t in tokens]
+            if token_upper not in symbols:
+                continue
 
         # Рассчитываем score
         apr = pool.get("apr", 0) or 0
-        tvl = pool.get("tvl_usd", 0) or 0
         il_risk = pool.get("il_risk", 0.25)
         is_trusted = pool.get("is_trusted", False)
 
@@ -544,10 +642,10 @@ def recommend_pools(
         "risk_profile": risk,
         "risk_parameters": risk_profile,
         "token_filter": token,
+        "total_analyzed": len(normalized),
         "total_matching": len(recommended),
         "recommendations": top,
         "top_recommendation": top[0] if top else None,
-        "note": f"Found {len(recommended)} pools matching {risk} risk profile",
     }
 
 
@@ -582,7 +680,7 @@ def get_positions(wallet: str) -> dict:
 
     jettons = result["data"].get("balances", [])
 
-    # Фильтруем LP токены (эвристика: имя содержит LP, Pool, или известные DEX)
+    # Фильтруем LP токены (эвристика)
     lp_keywords = ["LP", "Pool", "DeDust", "STON.fi", "Megaton", "TONCO"]
     lp_positions = []
 
@@ -610,7 +708,7 @@ def get_positions(wallet: str) -> dict:
                 "balance": balance,
                 "balance_formatted": balance_float,
                 "decimals": decimals,
-                "value_usd": None,  # Unknown without price data
+                "value_usd": None,
                 "note": "Detected as LP token by name pattern",
             })
 
@@ -620,7 +718,7 @@ def get_positions(wallet: str) -> dict:
         "wallet": wallet,
         "positions_count": len(lp_positions),
         "positions": lp_positions,
-        "note": "LP tokens detected by name pattern. Value estimation requires pool data.",
+        "note": "LP tokens detected by name pattern.",
     }
 
 
@@ -630,36 +728,20 @@ def get_positions(wallet: str) -> dict:
 
 
 def deposit_liquidity(*args, **kwargs) -> dict:
-    """
-    Депозит ликвидности в пул.
-    
-    ⚠️ НЕ ПОДДЕРЖИВАЕТСЯ через swap.coffee API.
-    Требуется прямое взаимодействие с контрактами DEX.
-    """
+    """Депозит не поддерживается через API."""
     return {
         "success": False,
         "error": "Deposit not supported via swap.coffee yield API",
-        "note": "swap.coffee yield API is a read-only aggregator. "
-                "Deposit requires direct interaction with DEX smart contracts "
-                "(STON.fi, DeDust, TONCO, etc.).",
-        "suggestion": "Use DEX-specific SDKs or the swap.py script for adding liquidity.",
+        "note": "API is read-only. Use DEX-specific SDKs for deposits.",
     }
 
 
 def withdraw_liquidity(*args, **kwargs) -> dict:
-    """
-    Вывод ликвидности из пула.
-    
-    ⚠️ НЕ ПОДДЕРЖИВАЕТСЯ через swap.coffee API.
-    Требуется прямое взаимодействие с контрактами DEX.
-    """
+    """Вывод не поддерживается через API."""
     return {
         "success": False,
         "error": "Withdraw not supported via swap.coffee yield API",
-        "note": "swap.coffee yield API is a read-only aggregator. "
-                "Withdraw requires direct interaction with DEX smart contracts "
-                "(STON.fi, DeDust, TONCO, etc.).",
-        "suggestion": "Use DEX-specific SDKs or burn LP tokens directly.",
+        "note": "API is read-only. Use DEX-specific SDKs for withdrawals.",
     }
 
 
@@ -670,58 +752,64 @@ def withdraw_liquidity(*args, **kwargs) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Yield/DeFi operations via swap.coffee v1 API (read-only aggregator)",
+        description="Yield/DeFi pools via swap.coffee v1 API",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Список пулов (2000 total, 100 max per page)
-  %(prog)s pools --sort apr
-  %(prog)s pools --sort tvl --min-tvl 1000000
-  %(prog)s pools --token TON --limit 10
-  %(prog)s pools --protocol stonfi
-  %(prog)s pools --protocol dedust --sort apr
-  %(prog)s pools --page 5 --limit 100
-  %(prog)s pools --all  # fetch all 2000 pools (slow)
+  # List pools (page 1, sorted by APR)
+  %(prog)s pools
+  %(prog)s pools --sort tvl --limit 50
   
-  # Детали пула
+  # Pagination
+  %(prog)s pools --page 2 --limit 100
+  %(prog)s pools --all  # all 2000 pools
+  
+  # Filters (client-side, fetches all pools)
+  %(prog)s pools --protocol stonfi
+  %(prog)s pools --token TON
+  %(prog)s pools --min-tvl 1000000
+  %(prog)s pools --trusted-only
+  %(prog)s pools --protocol dedust --token USDT --min-tvl 100000
+  
+  # Pool details
   %(prog)s pool --id EQD...abc
   
-  # Рекомендации
+  # Recommendations (fetches all pools for analysis)
   %(prog)s recommend --risk low
   %(prog)s recommend --token TON --risk medium
   
-  # Позиции (через TonAPI)
+  # LP positions
   %(prog)s positions --wallet EQD...xyz
 
-Supported protocols (16):
-  stonfi, stonfi_v2, dedust, tonco, evaa, tonstakers, stakee, bemo,
-  bemo_v2, hipo, kton, storm_trade, torch_finance, dao_lama_vault, bidask, coffee
+Protocols (16): tonstakers, stakee, bemo, bemo_v2, hipo, kton, stonfi,
+                stonfi_v2, dedust, tonco, evaa, storm_trade, torch_finance,
+                dao_lama_vault, bidask, coffee
 
-Total pools: 2000 | Max per page: 100 | Pagination: --page N
+Total: 2000 pools | Max per page: 100 | Cache: 5 min
 
-Risk levels: low, medium, high
-
-Note: Deposit/withdraw not supported via API — requires direct DEX contract interaction.
+Note: Server-side filters don't work — all filtering is client-side.
+      Deposit/withdraw require direct DEX contract interaction.
 """,
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # --- pools ---
-    pools_p = subparsers.add_parser("pools", help="List yield pools (2000 pools from 16 protocols)")
+    pools_p = subparsers.add_parser("pools", help="List yield pools")
     pools_p.add_argument(
         "--sort", "-s", default="apr", choices=["apr", "tvl", "volume"], help="Sort by"
     )
-    pools_p.add_argument("--min-tvl", type=float, help="Minimum TVL (USD) filter")
-    pools_p.add_argument("--token", "-t", help="Filter by token symbol")
+    pools_p.add_argument("--min-tvl", type=float, help="Minimum TVL USD (client-side)")
+    pools_p.add_argument("--token", "-t", help="Filter by token symbol (client-side)")
     pools_p.add_argument(
         "--protocol", "-P",
         choices=SUPPORTED_PROTOCOLS,
-        help="Filter by protocol"
+        help="Filter by protocol (client-side)"
     )
-    pools_p.add_argument("--limit", "-l", type=int, default=20, help="Max results per page (max 100)")
+    pools_p.add_argument("--trusted-only", action="store_true", help="Only trusted pools")
+    pools_p.add_argument("--limit", "-l", type=int, default=20, help="Results per page (max 100)")
     pools_p.add_argument("--page", "-p", type=int, default=1, help="Page number (1-indexed)")
-    pools_p.add_argument("--all", "-a", action="store_true", help="Fetch all 2000 pools (slow)")
+    pools_p.add_argument("--all", "-a", action="store_true", help="Fetch all 2000 pools")
 
     # --- pool ---
     pool_p = subparsers.add_parser("pool", help="Pool details")
@@ -731,35 +819,38 @@ Note: Deposit/withdraw not supported via API — requires direct DEX contract in
     rec_p = subparsers.add_parser("recommend", help="Get pool recommendations")
     rec_p.add_argument("--token", "-t", help="Preferred token")
     rec_p.add_argument(
-        "--risk",
-        "-r",
-        default="medium",
+        "--risk", "-r", default="medium",
         choices=["low", "medium", "high"],
         help="Risk level",
     )
-    rec_p.add_argument("--amount", "-a", type=float, help="Investment amount (informational)")
+    rec_p.add_argument("--amount", "-a", type=float, help="Investment amount (info only)")
 
     # --- deposit (not supported) ---
-    dep_p = subparsers.add_parser("deposit", help="⚠️ NOT SUPPORTED — requires direct DEX interaction")
+    dep_p = subparsers.add_parser("deposit", help="NOT SUPPORTED via API")
     dep_p.add_argument("--pool", help="Pool address")
     dep_p.add_argument("--amount", "-a", type=float, help="Amount")
     dep_p.add_argument("--wallet", "-w", help="Wallet")
     dep_p.add_argument("--token", "-t", help="Token")
-    dep_p.add_argument("--confirm", action="store_true", help="Confirm")
+    dep_p.add_argument("--confirm", action="store_true")
 
     # --- withdraw (not supported) ---
-    with_p = subparsers.add_parser("withdraw", help="⚠️ NOT SUPPORTED — requires direct DEX interaction")
+    with_p = subparsers.add_parser("withdraw", help="NOT SUPPORTED via API")
     with_p.add_argument("--pool", help="Pool address")
     with_p.add_argument("--wallet", "-w", help="Wallet")
     with_p.add_argument("--percentage", type=float, help="Percentage")
-    with_p.add_argument("--confirm", action="store_true", help="Confirm")
+    with_p.add_argument("--confirm", action="store_true")
 
     # --- positions ---
     pos_p = subparsers.add_parser("positions", help="View LP positions (via TonAPI)")
     pos_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
 
     # --- protocols ---
-    proto_p = subparsers.add_parser("protocols", help="List supported protocols")
+    subparsers.add_parser("protocols", help="List supported protocols")
+
+    # --- cache ---
+    cache_p = subparsers.add_parser("cache", help="Cache management")
+    cache_p.add_argument("--clear", action="store_true", help="Clear pools cache")
+    cache_p.add_argument("--status", action="store_true", help="Show cache status")
 
     args = parser.parse_args()
 
@@ -774,6 +865,7 @@ Note: Deposit/withdraw not supported via API — requires direct DEX contract in
                 min_tvl=args.min_tvl,
                 token=args.token,
                 protocol=args.protocol,
+                trusted_only=args.trusted_only,
                 limit=args.limit,
                 page=args.page,
                 fetch_all=getattr(args, "all", False),
@@ -801,10 +893,30 @@ Note: Deposit/withdraw not supported via API — requires direct DEX contract in
         elif args.command == "protocols":
             result = {
                 "success": True,
-                "protocols_count": len(SUPPORTED_PROTOCOLS),
+                "count": len(SUPPORTED_PROTOCOLS),
                 "protocols": SUPPORTED_PROTOCOLS,
-                "note": "swap.coffee aggregates pools from all these protocols",
             }
+
+        elif args.command == "cache":
+            if args.clear:
+                if CACHE_FILE.exists():
+                    CACHE_FILE.unlink()
+                    result = {"success": True, "message": "Cache cleared"}
+                else:
+                    result = {"success": True, "message": "Cache was empty"}
+            else:
+                cache = _load_cache()
+                if cache:
+                    age = int(time.time() - cache["cached_at"])
+                    result = {
+                        "success": True,
+                        "cached": True,
+                        "pools_count": len(cache["pools"]),
+                        "age_seconds": age,
+                        "expires_in": CACHE_TTL_SECONDS - age,
+                    }
+                else:
+                    result = {"success": True, "cached": False}
 
         else:
             result = {"error": f"Unknown command: {args.command}"}
