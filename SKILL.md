@@ -810,20 +810,30 @@ Script: `strategies.py`
 
 Create automated trading strategies via swap.coffee Strategies API.
 
-### ⚠️ IMPORTANT: Proxy Wallet Required
+### Architecture
 
-Before creating DCA/limit orders, you MUST deploy a proxy wallet contract (one-time).
+- Each user gets a **Strategies Wallet** (smart contract on-chain)
+- User sends funds + messages to this contract to create/cancel orders
+- Backend executes orders off-chain and initiates transactions on the wallet
+
+### ⚠️ IMPORTANT: Strategies Wallet Required
+
+Before creating DCA/limit orders, you MUST deploy a strategies wallet contract (one-time).
 
 **Flow:**
-1. `check` — Check if proxy wallet exists
+1. `check` — Check if strategies wallet exists
 2. `eligible` — Check if user is eligible (optional)
-3. `create-proxy` — Deploy proxy wallet contract
-4. `create-limit` / `create-dca` — Create orders
+3. `from-tokens` / `to-tokens` — Get eligible tokens
+4. `create-wallet` — Deploy strategies wallet contract (one-time)
+5. `create-order` — Create limit or DCA order
+6. `list-orders` / `get-order` — View orders
+7. `cancel-order` — Cancel order
 
-### Check Proxy Wallet Status
+### Check Strategies Wallet Status
 
 ```bash
 python strategies.py check --address UQBvW8...
+python strategies.py check --wallet main
 ```
 
 ### Check Eligibility
@@ -832,37 +842,70 @@ python strategies.py check --address UQBvW8...
 python strategies.py eligible --address UQBvW8...
 ```
 
-### Deploy Proxy Wallet (One-Time)
+### Get Eligible Tokens
 
 ```bash
-python strategies.py create-proxy --wallet main --confirm
+python strategies.py from-tokens --type limit
+python strategies.py to-tokens --type limit --from native
+python strategies.py to-tokens --type dca --from TON
+```
+
+### Deploy Strategies Wallet (One-Time)
+
+```bash
+python strategies.py create-wallet --wallet main --confirm
 ```
 
 ### Create Limit Order
 
 ```bash
-# Execute when TON price reaches 5.5 USDT
-python strategies.py create-limit --wallet main --from TON --to USDT --amount 10 --price 5.5 --confirm
+# Buy USDT when minimum output is met (set min-output in nano-units)
+python strategies.py create-order --wallet main --type limit \
+    --from TON --to USDT --amount 10 \
+    --min-output 50000000000 --slippage 1 --confirm
 ```
 
 ### Create DCA Order
 
 ```bash
-# Buy USDT with 100 TON, split into 10 orders, every 24 hours
-python strategies.py create-dca --wallet main --from TON --to USDT --amount 100 --orders 10 --interval 24 --confirm
+# Buy USDT with 100 TON, every hour, 10 times
+python strategies.py create-order --wallet main --type dca \
+    --from TON --to USDT --amount 100 \
+    --delay 3600 --invocations 10 --confirm
 ```
+
+**DCA Settings:**
+- `--delay` — Delay between purchases in seconds (3600 = 1 hour)
+- `--invocations` — Number of purchases to make
+- `--price-from` / `--price-to` — Optional price range
 
 ### List Orders
 
 ```bash
-python strategies.py list --wallet main --status active
-python strategies.py list --wallet main --type dca
+python strategies.py list-orders --wallet main
+python strategies.py list-orders --wallet main --status active
+```
+
+### Get Order Details
+
+```bash
+python strategies.py get-order --wallet main --order-id abc123
 ```
 
 ### Cancel Order
 
 ```bash
-python strategies.py cancel --wallet main --order-id abc123 --confirm
+python strategies.py cancel-order --wallet main --order-id abc123 --confirm
+```
+
+### Authentication
+
+The API requires `x-verify` header containing a TonConnect proof signature.
+This is automatically generated from your wallet's private key when using `--wallet`.
+
+**Required dependency:**
+```bash
+pip install pynacl
 ```
 
 ---
@@ -940,46 +983,11 @@ python staking.py extend --pool EQCkWx... --wallet main --days 30 --confirm
 
 ---
 
-## Profile & Extras
+## DEX Statistics & Contests
 
 Script: `profile.py`
 
-Manage swap.coffee profile, cashback, claims, referrals, and contests.
-
-### Profile History
-
-```bash
-python profile.py profile-history --wallet EQAbc...
-python profile.py profile-summary --wallet EQAbc...
-python profile.py profile-settings --wallet EQAbc...
-```
-
-### Cashback
-
-```bash
-python profile.py cashback-info --wallet EQAbc...
-python profile.py cashback-rewards --wallet EQAbc...
-python profile.py cashback-history --wallet EQAbc...
-```
-
-### Claim Tokens
-
-```bash
-python profile.py claim-stats --wallet EQAbc...
-python profile.py claim-available --wallet EQAbc...
-python profile.py claim --wallet EQAbc... --claim-id 123
-python profile.py claim --wallet EQAbc... --all
-```
-
-### Referrals
-
-```bash
-python profile.py referral-info --wallet EQAbc...
-python profile.py referral-stats --wallet EQAbc...
-python profile.py referral-rewards --wallet EQAbc...
-python profile.py referral-bind --wallet EQAbc... --code REF123
-python profile.py referral-aliases --wallet EQAbc...
-```
+View swap.coffee DEX statistics and contest information.
 
 ### DEX Statistics
 
@@ -993,8 +1001,9 @@ python profile.py stats-tokens --sort volume --limit 10
 
 ```bash
 python profile.py contests-active
+python profile.py contests --include-finished
 python profile.py contest --id contest123
-python profile.py contest-leaderboard --id contest123
+python profile.py contest-leaderboard --id contest123 --size 20
 python profile.py contest-position --id contest123 --wallet EQAbc...
 ```
 

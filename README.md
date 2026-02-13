@@ -105,10 +105,10 @@ A proof-of-concept for AI-driven open source development. The future is here. �
 
 ### 📈 DCA & Limit Orders
 - Dollar Cost Averaging (DCA) orders
-- Limit orders with target price
-- Automated trading via proxy wallet
-- Order management (list, cancel)
-- Eligibility checks
+- Limit orders with minimum output target
+- Automated trading via strategies wallet
+- Order management (list, get, cancel)
+- x-verify authentication (TonConnect proof)
 
 ### 🥩 Staking
 - Multi-protocol staking (TonStakers, Stakee, Bemo, Hipo, Kton)
@@ -117,12 +117,11 @@ A proof-of-concept for AI-driven open source development. The future is here. �
 - Staking points & rewards
 - APR comparison
 
-### 🎁 Profile & Rewards
-- Transaction history
-- Cashback info & claiming
-- Referral program (codes, aliases, rewards)
-- DEX statistics
+### 📊 DEX Statistics & Contests
+- DEX volume statistics
+- Top tokens by volume/liquidity
 - Active contests & leaderboards
+- User position tracking
 
 ### 🛡️ Security
 - Transaction emulation before execution
@@ -268,19 +267,23 @@ python monitor.py start -p <password> --daemon
 ### 11. Create DCA Order
 
 ```bash
-# First, deploy proxy wallet (one-time)
-python strategies.py check --address UQBvW8...
-python strategies.py create-proxy --wallet main --confirm
+# First, deploy strategies wallet (one-time)
+python strategies.py check --wallet main
+python strategies.py create-wallet --wallet main --confirm
 
-# Create DCA: buy USDT with 100 TON over 10 orders, every 24 hours
-python strategies.py create-dca --wallet main --from TON --to USDT --amount 100 --orders 10 --interval 24 --confirm
+# Create DCA: buy USDT with 100 TON, every hour, 10 times
+python strategies.py create-order --wallet main --type dca \
+    --from TON --to USDT --amount 100 \
+    --delay 3600 --invocations 10 --confirm
 ```
 
 ### 12. Create Limit Order
 
 ```bash
-# Execute when TON price reaches 5.5 USDT
-python strategies.py create-limit --wallet main --from TON --to USDT --amount 10 --price 5.5 --confirm
+# Buy USDT when minimum output is met (nano-units)
+python strategies.py create-order --wallet main --type limit \
+    --from TON --to USDT --amount 10 \
+    --min-output 50000000000 --slippage 1 --confirm
 ```
 
 ### 13. Stake TON
@@ -293,18 +296,19 @@ python staking.py pools --sort apr
 python staking.py stake --pool EQCkWx... --wallet main --amount 10 --confirm
 ```
 
-### 14. Check Cashback & Rewards
+### 14. Check DEX Statistics
 
 ```bash
-python profile.py cashback-info --wallet EQAbc...
-python profile.py claim-available --wallet EQAbc...
+python profile.py stats
+python profile.py stats-volume --period 7d
+python profile.py stats-tokens --sort volume --limit 10
 ```
 
 ### 15. View Active Contests
 
 ```bash
 python profile.py contests-active
-python profile.py contest-leaderboard --id contest123
+python profile.py contest-leaderboard --id contest123 --size 20
 ```
 
 ---
@@ -357,8 +361,7 @@ pytest --cov=scripts --cov-report=term-missing
 | **swap.coffee Swap** | Route, Build, Status | ✅ Full |
 | **swap.coffee Tokens** | List, Info, Search, Holders, Charts | ✅ Full |
 | **swap.coffee Yield** | Pools, Protocols, Recommendations | ✅ Full (read-only) |
-| **swap.coffee Strategies** | DCA, Limit orders, Proxy wallet | ✅ Full |
-| **swap.coffee Profile** | History, Cashback, Claims, Referrals | ✅ Full |
+| **swap.coffee Strategies** | DCA, Limit orders, Strategies wallet, x-verify auth | ✅ Full |
 | **swap.coffee Staking** | Pools, Positions, Stake/Unstake | ✅ Full |
 | **swap.coffee Statistics** | DEX stats, Volume, Top tokens | ✅ Full |
 | **swap.coffee Contests** | Active, Leaderboard, User position | ✅ Full |
@@ -375,7 +378,7 @@ pytest --cov=scripts --cov-report=term-missing
 
 1. **Yield deposit/withdraw not supported** — swap.coffee yield API is read-only; direct DEX interaction required for LP operations
 
-2. **Strategies require proxy wallet** — Before using DCA/limit orders, you must deploy a proxy wallet contract (one-time operation via `strategies.py create-proxy`)
+2. **Strategies require wallet deployment** — Before using DCA/limit orders, you must deploy a strategies wallet contract (one-time operation via `strategies.py create-wallet`). The API also requires `pynacl` for x-verify authentication.
 
 3. **Rate limiting** — Some APIs may rate-limit heavy usage; implement appropriate delays
 

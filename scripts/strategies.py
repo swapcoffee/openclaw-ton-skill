@@ -3,61 +3,73 @@
 OpenClaw TON Skill — DCA & Limit Orders via swap.coffee Strategies API
 
 =============================================================================
-IMPORTANT: PROXY WALLET DEPLOYMENT REQUIRED
-=============================================================================
-Before using DCA/limit orders, you MUST deploy a proxy wallet contract.
-This is a one-time operation per wallet.
-
-FLOW:
-1. check      — Check if proxy wallet exists (GET /v2/strategy/wallets)
-2. eligible   — Check if user is eligible for strategies (GET /v2/strategy/eligible)
-3. create-proxy — Deploy proxy wallet contract (POST /v2/strategy/create-proxy-wallet)
-                  Returns transaction(s) to sign and send
-4. create-order — Create DCA/limit order (only works AFTER proxy is deployed)
-
-If step 1 returns no proxy wallets, user must run step 3 first!
+SWAP.COFFEE STRATEGIES API (v1)
 =============================================================================
 
-Features:
-- Check eligibility for strategies
-- Check if proxy wallet is deployed
-- Deploy proxy wallet contract (one-time)
-- List active DCA/limit orders
-- Create new DCA or limit orders
-- Cancel existing orders
+Architecture:
+- Each user gets a Strategies Wallet (smart contract on-chain)
+- User sends funds + messages to this contract to create/cancel orders
+- Backend executes orders off-chain and initiates transactions on the wallet
 
-API Endpoints (v2):
-- GET /v2/strategy/eligible?wallet_address=... — check eligibility
-- GET /v2/strategy/wallets?wallet_address=... — check proxy wallet status
-- POST /v2/strategy/create-proxy-wallet — build proxy deployment transaction
-- GET /v2/strategy/orders?wallet_address=... — list orders
-- POST /v2/strategy/create-order — create new order
-- POST /v2/strategy/cancel-order — cancel order
+API Endpoints:
+- GET  /v1/strategy/wallets        — Check if strategies wallet exists
+- POST /v1/strategy/wallets        — Create strategies wallet (one-time)
+- GET  /v1/strategy/eligibility    — Check if user is eligible
+- GET  /v1/strategy/from-tokens    — Get eligible from-tokens
+- GET  /v1/strategy/to-tokens      — Get eligible to-tokens
+- POST /v1/strategy/orders         — Create order (returns tx to sign)
+- GET  /v1/strategy/orders         — List orders
+- GET  /v1/strategy/orders/{id}    — Get order details
+- DELETE /v1/strategy/orders/{id}  — Cancel order (returns tx to sign)
+
+Authentication:
+Most endpoints require `x-verify` header containing a TonConnect proof signature.
+This proves wallet ownership without requiring the user to connect via TonConnect.
+
+=============================================================================
 """
 
 import os
 import sys
 import json
+import time
 import base64
+import struct
+import hashlib
 import argparse
 import getpass
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any, Tuple
 
-# Локальный импорт
+# Local imports
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
-from utils import api_request, tonapi_request, load_config, is_valid_address
+from utils import (
+    api_request,
+    tonapi_request,
+    load_config,
+    is_valid_address,
+    normalize_address,
+    friendly_to_raw,
+)
 
 # TON SDK
 try:
     from tonsdk.contract.wallet import Wallets, WalletVersionEnum
     from tonsdk.boc import Cell
-
+    from tonsdk.utils import Address
     TONSDK_AVAILABLE = True
 except ImportError:
     TONSDK_AVAILABLE = False
+
+# NaCl for Ed25519 signatures
+try:
+    import nacl.signing
+    import nacl.encoding
+    NACL_AVAILABLE = True
+except ImportError:
+    NACL_AVAILABLE = False
 
 
 # =============================================================================
@@ -65,54 +77,246 @@ except ImportError:
 # =============================================================================
 
 SWAP_COFFEE_API = "https://backend.swap.coffee"
+STRATEGIES_API_V1 = f"{SWAP_COFFEE_API}/v1/strategy"
 
 # Order types
-ORDER_TYPES = ["dca", "limit"]
+ORDER_TYPES = ["limit", "dca"]
 
-# Strategy status
-STRATEGY_STATUS = ["active", "completed", "cancelled"]
+# Order statuses
+ORDER_STATUSES = ["active", "completed", "cancelled", "pending"]
+
+# X-Verify domain for swap.coffee
+XVERIFY_DOMAIN = "swap.coffee"
 
 
 # =============================================================================
-# Swap.coffee API
+# X-Verify (TonConnect Proof) Generation
 # =============================================================================
+
+def generate_ton_proof(
+    wallet_address: str,
+    private_key: bytes,
+    payload: str = "",
+    domain: str = XVERIFY_DOMAIN,
+) -> dict:
+    """
+    Generate TonConnect ton_proof for wallet verification.
+    
+    The proof follows TonConnect specification:
+    https://docs.ton.org/v3/guidelines/ton-connect/verifying-signed-in-users
+    
+    Args:
+        wallet_address: User's wallet address (friendly or raw format)
+        private_key: 32-byte Ed25519 private key (seed)
+        payload: Optional payload string (nonce)
+        domain: Domain name for the proof (default: swap.coffee)
+    
+    Returns:
+        dict with proof structure for x-verify header
+    """
+    if not NACL_AVAILABLE:
+        raise RuntimeError("nacl not installed. Run: pip install pynacl")
+    
+    # Normalize address to raw format for signing
+    if ":" not in wallet_address:
+        raw_addr = friendly_to_raw(wallet_address)
+    else:
+        raw_addr = wallet_address
+    
+    # Parse workchain and hash from raw address
+    workchain_str, hash_hex = raw_addr.split(":")
+    workchain = int(workchain_str)
+    addr_hash = bytes.fromhex(hash_hex)
+    
+    # Current timestamp
+    timestamp = int(time.time())
+    
+    # Domain length in bytes
+    domain_bytes = domain.encode('utf-8')
+    domain_len = len(domain_bytes)
+    
+    # Payload bytes
+    payload_bytes = payload.encode('utf-8') if payload else b''
+    
+    # Build the message to sign:
+    # message = utf8_encode("ton-proof-item-v2/") ++
+    #           Address (workchain:4BE + hash:32BE) ++
+    #           AppDomain (length:4LE + value) ++
+    #           Timestamp (8LE) ++
+    #           Payload
+    
+    message_parts = [
+        b"ton-proof-item-v2/",
+        struct.pack(">i", workchain),  # 4 bytes, big-endian (signed)
+        addr_hash,  # 32 bytes
+        struct.pack("<I", domain_len),  # 4 bytes, little-endian
+        domain_bytes,
+        struct.pack("<Q", timestamp),  # 8 bytes, little-endian
+        payload_bytes,
+    ]
+    message = b"".join(message_parts)
+    
+    # Hash the message
+    msg_hash = hashlib.sha256(message).digest()
+    
+    # Build full message: 0xffff || "ton-connect" || sha256(message)
+    full_message = b"\xff\xff" + b"ton-connect" + msg_hash
+    
+    # Hash full message
+    full_hash = hashlib.sha256(full_message).digest()
+    
+    # Sign with Ed25519
+    signing_key = nacl.signing.SigningKey(private_key[:32])
+    signature = signing_key.sign(full_hash).signature
+    
+    # Build proof structure
+    proof = {
+        "timestamp": timestamp,
+        "domain": {
+            "lengthBytes": domain_len,
+            "value": domain,
+        },
+        "signature": base64.b64encode(signature).decode('ascii'),
+        "payload": payload,
+    }
+    
+    return proof
+
+
+def generate_xverify_header(
+    wallet_address: str,
+    private_key: bytes,
+    public_key: bytes,
+    state_init_b64: Optional[str] = None,
+    payload: str = "",
+) -> str:
+    """
+    Generate x-verify header value for swap.coffee API.
+    
+    Args:
+        wallet_address: User's wallet address
+        private_key: 32-byte Ed25519 private key
+        public_key: 32-byte Ed25519 public key
+        state_init_b64: Optional base64-encoded stateInit
+        payload: Optional payload/nonce
+    
+    Returns:
+        JSON string to use as x-verify header value
+    """
+    proof = generate_ton_proof(wallet_address, private_key, payload)
+    
+    xverify = {
+        "address": wallet_address,
+        "public_key": public_key.hex(),
+        "proof": {
+            **proof,
+            "state_init": state_init_b64 or "",
+        }
+    }
+    
+    return json.dumps(xverify, separators=(',', ':'))
+
+
+# =============================================================================
+# Wallet Key Extraction
+# =============================================================================
+
+def get_wallet_keys(wallet_data: dict) -> Tuple[bytes, bytes, str]:
+    """
+    Extract private key, public key, and stateInit from wallet data.
+    
+    Args:
+        wallet_data: Wallet dict with mnemonic
+    
+    Returns:
+        Tuple of (private_key, public_key, state_init_b64)
+    """
+    if not TONSDK_AVAILABLE:
+        raise RuntimeError("tonsdk not installed. Run: pip install tonsdk")
+    
+    mnemonic = wallet_data.get("mnemonic")
+    if not mnemonic:
+        raise ValueError("Wallet has no mnemonic")
+    
+    if isinstance(mnemonic, str):
+        mnemonic = mnemonic.split()
+    
+    version_map = {
+        "v3r2": WalletVersionEnum.v3r2,
+        "v4r2": WalletVersionEnum.v4r2,
+    }
+    
+    version = wallet_data.get("version", "v4r2")
+    wallet_version = version_map.get(version.lower(), WalletVersionEnum.v4r2)
+    
+    # Generate wallet from mnemonic
+    _mnemonics, public_key, private_key, wallet = Wallets.from_mnemonics(
+        mnemonic, wallet_version, workchain=0
+    )
+    
+    # Get stateInit
+    state_init = wallet.create_state_init()["state_init"]
+    state_init_b64 = base64.b64encode(state_init.to_boc(False)).decode('ascii')
+    
+    return private_key, public_key, state_init_b64
+
+
+# =============================================================================
+# API Helpers
+# =============================================================================
+
+def _make_url_safe(address: str) -> str:
+    """Convert address to URL-safe format."""
+    return address.replace("+", "-").replace("/", "_")
 
 
 def get_swap_coffee_key() -> Optional[str]:
-    """Получает API ключ swap.coffee из конфига."""
+    """Get swap.coffee API key from config."""
     config = load_config()
-    return config.get("swap_coffee_key") or None
+    return config.get("swap_coffee_key") or os.environ.get("SWAP_COFFEE_KEY")
 
 
-def swap_coffee_request(
+def strategy_request(
     endpoint: str,
     method: str = "GET",
     params: Optional[dict] = None,
     json_data: Optional[dict] = None,
-    version: str = "v2",
+    xverify: Optional[str] = None,
+    wallet_address: Optional[str] = None,
 ) -> dict:
     """
-    Запрос к swap.coffee API.
-
+    Make request to swap.coffee Strategy API.
+    
     Args:
-        endpoint: Endpoint (например "/strategy/wallets")
-        method: HTTP метод
-        params: Query параметры
+        endpoint: API endpoint (e.g., "/wallets")
+        method: HTTP method
+        params: Query parameters
         json_data: JSON body
-        version: Версия API ("v1" или "v2")
-
+        xverify: x-verify header value (TonConnect proof)
+        wallet_address: Wallet address header
+    
     Returns:
-        dict с результатом
+        dict with success, data/error, status_code
     """
-    base_url = f"{SWAP_COFFEE_API}/{version}"
+    url = f"{STRATEGIES_API_V1}{endpoint}"
     api_key = get_swap_coffee_key()
-
-    headers = {"Content-Type": "application/json"}
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    
     if api_key:
         headers["X-Api-Key"] = api_key
-
+    
+    if xverify:
+        headers["x-verify"] = xverify
+    
+    if wallet_address:
+        headers["wallet_address"] = wallet_address
+    
     return api_request(
-        url=f"{base_url}{endpoint}",
+        url=url,
         method=method,
         headers=headers,
         params=params,
@@ -120,18 +324,12 @@ def swap_coffee_request(
     )
 
 
-def _make_url_safe(address: str) -> str:
-    """Конвертирует адрес в URL-safe формат."""
-    return address.replace("+", "-").replace("/", "_")
-
-
 # =============================================================================
 # Wallet Storage
 # =============================================================================
 
-
 def get_wallet_from_storage(identifier: str, password: str) -> Optional[dict]:
-    """Получает кошелёк из хранилища."""
+    """Get wallet from encrypted storage."""
     try:
         from wallet import WalletStorage
         storage = WalletStorage(password)
@@ -141,29 +339,31 @@ def get_wallet_from_storage(identifier: str, password: str) -> Optional[dict]:
 
 
 def create_wallet_instance(wallet_data: dict):
-    """Создаёт инстанс кошелька для подписания."""
+    """Create wallet instance for signing."""
     if not TONSDK_AVAILABLE:
-        raise RuntimeError("tonsdk not available")
-
+        raise RuntimeError("tonsdk not installed")
+    
     mnemonic = wallet_data.get("mnemonic")
     if not mnemonic:
         raise ValueError("Wallet has no mnemonic")
-
+    
+    if isinstance(mnemonic, str):
+        mnemonic = mnemonic.split()
+    
     version_map = {
         "v3r2": WalletVersionEnum.v3r2,
         "v4r2": WalletVersionEnum.v4r2,
     }
-
+    
     version = wallet_data.get("version", "v4r2")
     wallet_version = version_map.get(version.lower(), WalletVersionEnum.v4r2)
-
+    
     _, _, _, wallet = Wallets.from_mnemonics(mnemonic, wallet_version, workchain=0)
-
     return wallet
 
 
 def get_seqno(address: str) -> int:
-    """Получает seqno кошелька."""
+    """Get wallet seqno."""
     addr_safe = _make_url_safe(address)
     result = tonapi_request(f"/wallet/{addr_safe}/seqno")
     if result["success"]:
@@ -172,32 +372,115 @@ def get_seqno(address: str) -> int:
 
 
 # =============================================================================
-# Strategy Wallet & Eligibility
+# Strategy Wallet Operations
 # =============================================================================
+
+def check_strategy_wallet(wallet_address: str, xverify: Optional[str] = None) -> dict:
+    """
+    Check if strategies wallet exists for the user.
+    
+    GET /v1/strategy/wallets?wallet_address=USER_ADDR
+    
+    Args:
+        wallet_address: User's wallet address
+        xverify: x-verify header (TonConnect proof)
+    
+    Returns:
+        dict with wallet status
+    """
+    params = {"wallet_address": _make_url_safe(wallet_address)}
+    
+    result = strategy_request("/wallets", params=params, xverify=xverify)
+    
+    if not result["success"]:
+        if result.get("status_code") == 404:
+            return {
+                "success": True,
+                "has_wallet": False,
+                "wallet_address": wallet_address,
+                "message": "⚠️ Strategies wallet NOT deployed. Use 'create-wallet' first.",
+                "next_step": "Run: strategies.py create-wallet --wallet <name> --confirm"
+            }
+        return {
+            "success": False,
+            "error": result.get("error", "Failed to check strategies wallet"),
+            "wallet_address": wallet_address,
+            "note": "x-verify header may be required for this endpoint"
+        }
+    
+    data = result["data"]
+    
+    return {
+        "success": True,
+        "has_wallet": True,
+        "wallet_address": wallet_address,
+        "strategies_wallet": data,
+        "message": "✅ Strategies wallet exists. Ready to create orders.",
+    }
+
+
+def create_strategy_wallet(wallet_address: str, xverify: str) -> dict:
+    """
+    Create strategies wallet (one-time deployment).
+    
+    POST /v1/strategy/wallets
+    
+    Args:
+        wallet_address: User's wallet address
+        xverify: x-verify header (required)
+    
+    Returns:
+        dict with transaction to sign and send
+    """
+    result = strategy_request(
+        "/wallets",
+        method="POST",
+        json_data={"wallet_address": wallet_address},
+        xverify=xverify,
+        wallet_address=wallet_address,
+    )
+    
+    if not result["success"]:
+        return {
+            "success": False,
+            "error": result.get("error", "Failed to create strategies wallet"),
+            "wallet_address": wallet_address
+        }
+    
+    data = result["data"]
+    
+    return {
+        "success": True,
+        "wallet_address": wallet_address,
+        "transaction": {
+            "address": data.get("address"),
+            "value": data.get("value"),
+            "payload_cell": data.get("payload_cell"),
+            "state_init": data.get("state_init"),
+        },
+        "message": "Sign and send this transaction to deploy your strategies wallet.",
+    }
 
 
 def check_eligibility(wallet_address: str) -> dict:
     """
-    Проверяет, может ли пользователь использовать стратегии.
+    Check if wallet is eligible for strategies.
     
-    Некоторые кошельки могут быть не eligible (например, новые или с низким объёмом).
-
+    GET /v1/strategy/eligibility?wallet_address=USER_ADDR
+    
     Args:
-        wallet_address: Адрес кошелька
-
+        wallet_address: User's wallet address
+    
     Returns:
-        dict с информацией об eligibility
+        dict with eligibility info
     """
-    addr_safe = _make_url_safe(wallet_address)
-
-    result = swap_coffee_request(
-        "/strategy/eligible",
-        params={"wallet_address": addr_safe}
-    )
-
+    params = {"wallet_address": _make_url_safe(wallet_address)}
+    
+    result = strategy_request("/eligibility", params=params)
+    
     if not result["success"]:
-        # If endpoint doesn't exist or returns error, assume eligible
         if result.get("status_code") == 404:
+            # Endpoint may not exist, assume eligible
             return {
                 "success": True,
                 "wallet_address": wallet_address,
@@ -207,354 +490,309 @@ def check_eligibility(wallet_address: str) -> dict:
         return {
             "success": False,
             "error": result.get("error", "Failed to check eligibility"),
-            "wallet_address": wallet_address
         }
-
+    
     data = result["data"]
     eligible = data.get("eligible", True) if isinstance(data, dict) else True
-
+    
     return {
         "success": True,
         "wallet_address": wallet_address,
         "eligible": eligible,
         "reason": data.get("reason") if isinstance(data, dict) else None,
-        "requirements": data.get("requirements") if isinstance(data, dict) else None,
-        "message": "Eligible for strategies" if eligible else "Not eligible for strategies"
+        "message": "✅ Eligible for strategies" if eligible else "❌ Not eligible"
     }
 
 
-def check_strategy_wallet(wallet_address: str) -> dict:
+def get_from_tokens(order_type: str = "limit") -> dict:
     """
-    Проверяет, развёрнут ли прокси-кошелёк для стратегий.
+    Get eligible from-tokens for strategies.
     
-    ВАЖНО: Перед созданием DCA/limit ордеров необходимо развернуть прокси-кошелёк!
-    Это одноразовая операция. Если прокси-кошелёк не найден, используйте 'create-proxy'.
-
+    GET /v1/strategy/from-tokens?type=limit|dca
+    
     Args:
-        wallet_address: Адрес кошелька
-
+        order_type: Order type (limit or dca)
+    
     Returns:
-        dict с информацией о прокси-кошельке
+        dict with list of eligible tokens
     """
-    addr_safe = _make_url_safe(wallet_address)
-
-    result = swap_coffee_request(
-        "/strategy/wallets",
-        params={"wallet_address": addr_safe}
-    )
-
+    if order_type not in ORDER_TYPES:
+        return {"success": False, "error": f"Invalid type. Must be: {ORDER_TYPES}"}
+    
+    result = strategy_request("/from-tokens", params={"type": order_type})
+    
     if not result["success"]:
-        # 404 означает, что прокси-кошелёк не развёрнут
-        if result.get("status_code") == 404:
-            return {
-                "success": True,
-                "has_proxy": False,
-                "wallet_address": wallet_address,
-                "proxy_wallets": [],
-                "message": "⚠️ Proxy wallet NOT deployed. You must deploy it first using 'create-proxy' command before creating orders.",
-                "next_step": "Run: strategies.py create-proxy --wallet <your_wallet> --confirm"
-            }
         return {
             "success": False,
-            "error": result.get("error", "Failed to check proxy wallet"),
-            "wallet_address": wallet_address
+            "error": result.get("error", "Failed to get from-tokens")
         }
-
-    data = result["data"]
     
-    # Парсим ответ
-    wallets = data if isinstance(data, list) else ([data] if data else [])
-    has_proxy = len(wallets) > 0
+    data = result["data"]
+    tokens = data if isinstance(data, list) else data.get("tokens", [])
     
     return {
         "success": True,
-        "has_proxy": has_proxy,
-        "wallet_address": wallet_address,
-        "proxy_wallets": wallets,
-        "message": f"✅ Proxy wallet deployed. Found {len(wallets)} proxy wallet(s). Ready to create orders." if has_proxy else "⚠️ No proxy wallets found. Deploy one using 'create-proxy'.",
-        "next_step": "Run: strategies.py create-limit/create-dca ..." if has_proxy else "Run: strategies.py create-proxy --wallet <your_wallet> --confirm"
+        "order_type": order_type,
+        "tokens": tokens,
+        "count": len(tokens),
     }
 
 
-def build_create_proxy_tx(wallet_address: str) -> dict:
+def get_to_tokens(order_type: str = "limit", from_token: str = "native") -> dict:
     """
-    Строит транзакцию для развёртывания прокси-кошелька.
+    Get eligible to-tokens for a given from-token.
     
-    Прокси-кошелёк — это смарт-контракт, который будет исполнять DCA/limit ордера.
-    Развёртывание требует отправки транзакции с оплатой gas.
-
+    GET /v1/strategy/to-tokens?type=limit&from_token=ADDR
+    
     Args:
-        wallet_address: Адрес основного кошелька
-
+        order_type: Order type (limit or dca)
+        from_token: From token address ("native" for TON)
+    
     Returns:
-        dict с транзакцией для подписания и отправки
+        dict with list of eligible tokens
     """
-    result = swap_coffee_request(
-        "/strategy/create-proxy-wallet",
-        method="POST",
-        json_data={"wallet_address": wallet_address}
-    )
-
+    if order_type not in ORDER_TYPES:
+        return {"success": False, "error": f"Invalid type. Must be: {ORDER_TYPES}"}
+    
+    params = {"type": order_type, "from_token": from_token}
+    result = strategy_request("/to-tokens", params=params)
+    
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to build proxy deployment transaction"),
-            "wallet_address": wallet_address
+            "error": result.get("error", "Failed to get to-tokens")
         }
-
+    
     data = result["data"]
+    tokens = data if isinstance(data, list) else data.get("tokens", [])
     
-    # API может вернуть транзакции для подписания
-    transactions = data.get("transactions", []) if isinstance(data, dict) else []
-    
-    # Или может вернуть уже развёрнутый адрес (если уже существует)
-    proxy_address = data.get("proxy_address") or data.get("address") if isinstance(data, dict) else None
-
     return {
         "success": True,
-        "wallet_address": wallet_address,
-        "transactions": transactions,
-        "proxy_address": proxy_address,
-        "message": "Proxy wallet deployment transaction ready. Sign and send to deploy." if transactions else "Proxy wallet info retrieved.",
-        "note": "This is a one-time deployment. After the transaction is confirmed, you can create DCA/limit orders."
+        "order_type": order_type,
+        "from_token": from_token,
+        "tokens": tokens,
+        "count": len(tokens),
     }
 
 
 # =============================================================================
-# Orders
+# Order Operations
 # =============================================================================
-
 
 def list_orders(
     wallet_address: str,
-    order_type: Optional[str] = None,
+    xverify: str,
     status: Optional[str] = None,
 ) -> dict:
     """
-    Получает список ордеров для кошелька.
-
+    List strategy orders for wallet.
+    
+    GET /v1/strategy/orders?wallet_address=USER_ADDR
+    
     Args:
-        wallet_address: Адрес кошелька
-        order_type: Фильтр по типу (dca, limit)
-        status: Фильтр по статусу (active, completed, cancelled)
-
+        wallet_address: User's wallet address
+        xverify: x-verify header
+        status: Filter by status (active, completed, cancelled)
+    
     Returns:
-        dict со списком ордеров
+        dict with list of orders
     """
-    addr_safe = _make_url_safe(wallet_address)
-
-    params = {"wallet_address": addr_safe}
-    if order_type:
-        params["order_type"] = order_type
+    params = {"wallet_address": _make_url_safe(wallet_address)}
     if status:
         params["status"] = status
-
-    result = swap_coffee_request("/strategy/orders", params=params)
-
+    
+    result = strategy_request("/orders", params=params, xverify=xverify)
+    
     if not result["success"]:
         if result.get("status_code") == 404:
             return {
                 "success": True,
                 "wallet_address": wallet_address,
                 "orders": [],
-                "orders_count": 0,
+                "count": 0,
                 "message": "No orders found"
             }
         return {
             "success": False,
-            "error": result.get("error", "Failed to get orders")
+            "error": result.get("error", "Failed to list orders")
         }
-
+    
     data = result["data"]
     orders = data if isinstance(data, list) else data.get("orders", [])
-
-    # Нормализуем ордера
-    normalized = []
-    for order in orders:
-        normalized.append({
-            "id": order.get("id") or order.get("order_id"),
-            "type": order.get("type") or order.get("order_type"),
-            "status": order.get("status"),
-            "input_token": order.get("input_token"),
-            "output_token": order.get("output_token"),
-            "input_amount": order.get("input_amount"),
-            "output_amount": order.get("output_amount"),
-            "executed_amount": order.get("executed_amount"),
-            "remaining_amount": order.get("remaining_amount"),
-            "price": order.get("price") or order.get("target_price"),
-            "interval": order.get("interval"),  # For DCA
-            "created_at": order.get("created_at"),
-            "raw": order
-        })
-
+    
     return {
         "success": True,
         "wallet_address": wallet_address,
-        "orders": normalized,
-        "orders_count": len(normalized),
-        "filters": {
-            "order_type": order_type,
-            "status": status
-        }
+        "orders": orders,
+        "count": len(orders),
+        "filters": {"status": status},
     }
 
 
-def get_order(order_id: str, wallet_address: str) -> dict:
+def get_order(order_id: str, wallet_address: str, xverify: Optional[str] = None) -> dict:
     """
-    Получает детали конкретного ордера.
-
+    Get order details.
+    
+    GET /v1/strategy/orders/{id}?wallet_address=USER_ADDR
+    
     Args:
-        order_id: ID ордера
-        wallet_address: Адрес кошелька
-
+        order_id: Order ID
+        wallet_address: User's wallet address
+        xverify: x-verify header
+    
     Returns:
-        dict с деталями ордера
+        dict with order details
     """
-    result = swap_coffee_request(
-        f"/strategy/orders/{order_id}",
-        params={"wallet_address": _make_url_safe(wallet_address)}
-    )
-
+    params = {"wallet_address": _make_url_safe(wallet_address)}
+    
+    result = strategy_request(f"/orders/{order_id}", params=params, xverify=xverify)
+    
     if not result["success"]:
         return {
             "success": False,
             "error": result.get("error", "Order not found"),
             "order_id": order_id
         }
-
+    
     return {
         "success": True,
+        "order_id": order_id,
         "order": result["data"]
     }
 
 
-def build_create_order_tx(
+def create_order(
     wallet_address: str,
+    xverify: str,
     order_type: str,
-    input_token: str,
-    output_token: str,
-    input_amount: float,
-    target_price: Optional[float] = None,
-    interval_hours: Optional[int] = None,
-    total_orders: Optional[int] = None,
+    token_from: str,
+    token_to: str,
+    input_amount: str,
+    max_suborders: int = 1,
+    max_invocations: int = 1,
+    slippage: float = 1.0,
+    settings: Optional[dict] = None,
 ) -> dict:
     """
-    Строит транзакцию для создания ордера.
-
+    Create a strategy order.
+    
+    POST /v1/strategy/orders
+    
     Args:
-        wallet_address: Адрес кошелька
-        order_type: Тип ордера (dca, limit)
-        input_token: Входной токен (адрес или символ)
-        output_token: Выходной токен
-        input_amount: Сумма входного токена
-        target_price: Целевая цена (для limit)
-        interval_hours: Интервал между покупками в часах (для dca)
-        total_orders: Количество покупок (для dca)
-
+        wallet_address: User's wallet address
+        xverify: x-verify header
+        order_type: "limit" or "dca"
+        token_from: From token address ("native" for TON)
+        token_to: To token address
+        input_amount: Amount in nano-units (string)
+        max_suborders: Max suborders (default 1)
+        max_invocations: Max invocations (default 1)
+        slippage: Slippage percentage (default 1%)
+        settings: Order-specific settings:
+            - For limit: {"min_output_amount": "VALUE"}
+            - For DCA: {"delay": 3600, "price_range_from": 0.0, "price_range_to": 0.0}
+    
     Returns:
-        dict с транзакцией для подписания
+        dict with transaction to sign and send
     """
-    # Валидация
     if order_type not in ORDER_TYPES:
-        return {
-            "success": False,
-            "error": f"Invalid order type. Must be one of: {ORDER_TYPES}"
-        }
-
-    if order_type == "limit" and not target_price:
-        return {
-            "success": False,
-            "error": "target_price required for limit orders"
-        }
-
-    if order_type == "dca":
-        if not interval_hours or not total_orders:
-            return {
-                "success": False,
-                "error": "interval_hours and total_orders required for DCA orders"
-            }
-
-    # Формируем запрос
+        return {"success": False, "error": f"Invalid type. Must be: {ORDER_TYPES}"}
+    
     order_data = {
-        "wallet_address": wallet_address,
-        "order_type": order_type,
-        "input_token": {"blockchain": "ton", "address": input_token},
-        "output_token": {"blockchain": "ton", "address": output_token},
-        "input_amount": input_amount,
+        "type": order_type,
+        "token_from": {
+            "blockchain": "ton",
+            "address": token_from,
+        },
+        "token_to": {
+            "blockchain": "ton",
+            "address": token_to,
+        },
+        "input_amount": str(input_amount),
+        "max_suborders": max_suborders,
+        "max_invocations": max_invocations,
+        "slippage": slippage,
+        "settings": settings or {},
     }
-
-    if order_type == "limit":
-        order_data["target_price"] = target_price
-
-    if order_type == "dca":
-        order_data["interval_seconds"] = interval_hours * 3600
-        order_data["total_orders"] = total_orders
-        order_data["amount_per_order"] = input_amount / total_orders
-
-    result = swap_coffee_request(
-        "/strategy/create-order",
+    
+    result = strategy_request(
+        "/orders",
         method="POST",
-        json_data=order_data
+        json_data=order_data,
+        xverify=xverify,
+        wallet_address=wallet_address,
     )
-
+    
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to build order transaction")
+            "error": result.get("error", "Failed to create order"),
+            "order_type": order_type,
         }
-
+    
     data = result["data"]
-
+    
     return {
         "success": True,
         "order_type": order_type,
-        "transactions": data.get("transactions", []),
-        "order_preview": {
-            "input_token": input_token,
-            "output_token": output_token,
-            "input_amount": input_amount,
-            "target_price": target_price,
-            "interval_hours": interval_hours,
-            "total_orders": total_orders,
+        "transaction": {
+            "address": data.get("address"),
+            "value": data.get("value"),
+            "payload_cell": data.get("payload_cell"),
         },
-        "raw_response": data
+        "order_preview": {
+            "token_from": token_from,
+            "token_to": token_to,
+            "input_amount": input_amount,
+            "settings": settings,
+        },
+        "message": "Sign and send this transaction to create the order.",
     }
 
 
-def build_cancel_order_tx(order_id: str, wallet_address: str) -> dict:
+def cancel_order(
+    order_id: str,
+    wallet_address: str,
+    xverify: str,
+) -> dict:
     """
-    Строит транзакцию для отмены ордера.
-
+    Cancel a strategy order.
+    
+    DELETE /v1/strategy/orders/{id}
+    
     Args:
-        order_id: ID ордера для отмены
-        wallet_address: Адрес кошелька
-
+        order_id: Order ID to cancel
+        wallet_address: User's wallet address
+        xverify: x-verify header
+    
     Returns:
-        dict с транзакцией для подписания
+        dict with transaction to sign and send
     """
-    result = swap_coffee_request(
-        "/strategy/cancel-order",
-        method="POST",
-        json_data={
-            "order_id": order_id,
-            "wallet_address": wallet_address
-        }
+    result = strategy_request(
+        f"/orders/{order_id}",
+        method="DELETE",
+        xverify=xverify,
+        wallet_address=wallet_address,
     )
-
+    
     if not result["success"]:
         return {
             "success": False,
-            "error": result.get("error", "Failed to build cancel transaction"),
-            "order_id": order_id
+            "error": result.get("error", "Failed to cancel order"),
+            "order_id": order_id,
         }
-
+    
     data = result["data"]
-
+    
     return {
         "success": True,
         "order_id": order_id,
-        "transactions": data.get("transactions", []),
-        "raw_response": data
+        "transaction": {
+            "address": data.get("address"),
+            "value": data.get("value"),
+            "payload_cell": data.get("payload_cell"),
+        },
+        "message": "Sign and send this transaction to cancel the order.",
     }
 
 
@@ -562,23 +800,22 @@ def build_cancel_order_tx(order_id: str, wallet_address: str) -> dict:
 # Transaction Execution
 # =============================================================================
 
-
 def emulate_transaction(boc_b64: str) -> dict:
-    """Эмулирует транзакцию."""
+    """Emulate transaction before sending."""
     result = tonapi_request(
         "/wallet/emulate",
         method="POST",
         json_data={"boc": boc_b64}
     )
-
+    
     if not result["success"]:
         return {"success": False, "error": result.get("error")}
-
+    
     data = result["data"]
     event = data.get("event", data)
     extra = event.get("extra", 0)
     fee = abs(extra) if extra < 0 else 0
-
+    
     return {
         "success": True,
         "fee_nano": fee,
@@ -588,137 +825,169 @@ def emulate_transaction(boc_b64: str) -> dict:
 
 
 def send_transaction(boc_b64: str) -> dict:
-    """Отправляет транзакцию."""
+    """Send transaction to blockchain."""
     result = tonapi_request(
         "/blockchain/message",
         method="POST",
         json_data={"boc": boc_b64}
     )
-
+    
     if not result["success"]:
         return {"success": False, "error": result.get("error")}
-
+    
     return {"success": True, "data": result.get("data")}
 
 
 def execute_strategy_tx(
-    wallet_label: str,
-    transactions: List[dict],
-    password: str,
-    confirm: bool = False
+    wallet_data: dict,
+    transaction: dict,
+    confirm: bool = False,
 ) -> dict:
     """
-    Выполняет транзакции стратегии.
-
+    Execute a strategy transaction (create wallet, create order, cancel order).
+    
     Args:
-        wallet_label: Лейбл кошелька
-        transactions: Список транзакций от API
-        password: Пароль кошелька
-        confirm: Подтверждение выполнения
-
+        wallet_data: Wallet dict with mnemonic
+        transaction: Transaction dict from API (address, value, payload_cell)
+        confirm: Actually send (True) or just emulate (False)
+    
     Returns:
-        dict с результатом
+        dict with execution result
     """
     if not TONSDK_AVAILABLE:
         return {"success": False, "error": "tonsdk not installed"}
-
-    # Получаем кошелёк
-    wallet_data = get_wallet_from_storage(wallet_label, password)
-    if not wallet_data:
-        return {"success": False, "error": f"Wallet not found: {wallet_label}"}
-
+    
     sender_address = wallet_data["address"]
     wallet = create_wallet_instance(wallet_data)
     seqno = get_seqno(sender_address)
-
-    signed_txs = []
-    total_fee = 0
-
-    for i, tx in enumerate(transactions):
-        to_addr = tx.get("address")
-        amount = int(tx.get("value", "0"))
-        cell_b64 = tx.get("cell")
-        send_mode = tx.get("send_mode", 3)
-
-        if not to_addr:
-            continue
-
-        payload = None
-        if cell_b64:
-            try:
-                cell_bytes = base64.b64decode(cell_b64)
-                payload = Cell.one_from_boc(cell_bytes)
-            except Exception as e:
-                return {"success": False, "error": f"Failed to decode cell: {e}"}
-
+    
+    to_addr = transaction.get("address")
+    amount = int(transaction.get("value", "0"))
+    payload_b64 = transaction.get("payload_cell")
+    state_init_b64 = transaction.get("state_init")
+    
+    if not to_addr:
+        return {"success": False, "error": "Missing transaction address"}
+    
+    # Decode payload cell
+    payload = None
+    if payload_b64:
         try:
-            query = wallet.create_transfer_message(
-                to_addr=to_addr,
-                amount=amount,
-                payload=payload,
-                seqno=seqno + i,
-                send_mode=send_mode,
-            )
+            cell_bytes = base64.b64decode(payload_b64)
+            payload = Cell.one_from_boc(cell_bytes)
         except Exception as e:
-            return {"success": False, "error": f"Failed to create transfer: {e}"}
-
-        boc = query["message"].to_boc(False)
-        boc_b64 = base64.b64encode(boc).decode("ascii")
-
-        emulation = emulate_transaction(boc_b64)
-
-        signed_txs.append({
-            "index": i,
-            "to": to_addr,
-            "amount_nano": amount,
-            "amount_ton": amount / 1e9,
-            "boc": boc_b64,
-            "emulation": emulation,
-        })
-
-        if emulation["success"]:
-            total_fee += emulation.get("fee_nano", 0)
-
+            return {"success": False, "error": f"Failed to decode payload: {e}"}
+    
+    # Decode state_init if present
+    state_init = None
+    if state_init_b64:
+        try:
+            si_bytes = base64.b64decode(state_init_b64)
+            state_init = Cell.one_from_boc(si_bytes)
+        except Exception as e:
+            return {"success": False, "error": f"Failed to decode state_init: {e}"}
+    
+    # Create transfer message
+    try:
+        query = wallet.create_transfer_message(
+            to_addr=to_addr,
+            amount=amount,
+            payload=payload,
+            seqno=seqno,
+            state_init=state_init,
+        )
+    except Exception as e:
+        return {"success": False, "error": f"Failed to create transfer: {e}"}
+    
+    boc = query["message"].to_boc(False)
+    boc_b64 = base64.b64encode(boc).decode("ascii")
+    
+    # Emulate
+    emulation = emulate_transaction(boc_b64)
+    
     result = {
         "wallet": sender_address,
-        "transactions": signed_txs,
-        "total_fee_nano": total_fee,
-        "total_fee_ton": total_fee / 1e9,
+        "to": to_addr,
+        "amount_nano": amount,
+        "amount_ton": amount / 1e9,
+        "emulation": emulation,
+        "boc": boc_b64,
     }
-
+    
     if confirm:
-        sent_count = 0
-        errors = []
-
-        for tx in signed_txs:
-            send_result = send_transaction(tx["boc"])
-            if send_result["success"]:
-                sent_count += 1
-            else:
-                errors.append(send_result.get("error"))
-
-        result["sent_count"] = sent_count
-        result["total_transactions"] = len(signed_txs)
-
-        if sent_count == len(signed_txs):
+        send_result = send_transaction(boc_b64)
+        result["sent"] = send_result["success"]
+        if send_result["success"]:
             result["success"] = True
-            result["message"] = "Transaction executed successfully"
+            result["message"] = "✅ Transaction sent successfully"
         else:
             result["success"] = False
-            result["error"] = "Failed to send transactions"
-            result["errors"] = errors
+            result["error"] = send_result.get("error", "Failed to send")
     else:
         result["success"] = True
         result["confirmed"] = False
         result["message"] = "Transaction simulated. Use --confirm to execute."
-
+    
     return result
+
+
+# =============================================================================
+# CLI Helpers
+# =============================================================================
+
+def resolve_wallet_and_xverify(
+    wallet_label: str,
+    password: str,
+) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Resolve wallet data and generate x-verify header.
+    
+    Args:
+        wallet_label: Wallet label or address
+        password: Wallet password
+    
+    Returns:
+        Tuple of (wallet_data, xverify_header)
+    """
+    wallet_data = get_wallet_from_storage(wallet_label, password)
+    if not wallet_data:
+        return None, None
+    
+    try:
+        private_key, public_key, state_init = get_wallet_keys(wallet_data)
+        xverify = generate_xverify_header(
+            wallet_data["address"],
+            private_key,
+            public_key,
+            state_init,
+        )
+        return wallet_data, xverify
+    except Exception as e:
+        return wallet_data, None
+
+
+def resolve_token(token: str) -> str:
+    """Resolve token symbol or address."""
+    # Common token symbols
+    TOKENS = {
+        "TON": "native",
+        "USDT": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
+        "USDC": "EQC61IQRl0_la95t27xhIpjxZt32vl1QQVF2UgTNuvD18W-4",
+        "NOT": "EQAvlWFDxGF2lXm67y4yzC17wYKD9A0guwPkMs1gOsM__NOT",
+        "DOGS": "EQCvxJy4eG8hyHBFsZ7eePxrRsUQSFE_jpptRAYBmcG_DOGS",
+        "SCALE": "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE",
+    }
+    
+    upper = token.upper().strip()
+    if upper in TOKENS:
+        return TOKENS[upper]
+    
+    return token
 
 
 # =============================================================================
 # CLI
 # =============================================================================
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -726,300 +995,308 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 ================================================================================
-IMPORTANT: PROXY WALLET REQUIRED
+WORKFLOW
 ================================================================================
-Before creating DCA/limit orders, you MUST deploy a proxy wallet contract.
-This is a one-time operation per wallet.
+1. Check if strategies wallet exists:
+   %(prog)s check --wallet main
 
-RECOMMENDED FLOW:
-  1. %(prog)s check --wallet UQBvW8...     # Check if proxy exists
-  2. %(prog)s eligible --wallet UQBvW8...  # Check eligibility (optional)
-  3. %(prog)s create-proxy --wallet main --confirm  # Deploy proxy (one-time)
-  4. %(prog)s create-limit/create-dca ...  # Create orders
+2. Create strategies wallet (one-time):
+   %(prog)s create-wallet --wallet main --confirm
+
+3. Check eligible tokens:
+   %(prog)s from-tokens --type limit
+   %(prog)s to-tokens --type limit --from native
+
+4. Create order:
+   %(prog)s create-order --wallet main --type limit \\
+       --from TON --to USDT --amount 10 \\
+       --min-output 50000000 --confirm
+
+5. List orders:
+   %(prog)s list-orders --wallet main
+
+6. Cancel order:
+   %(prog)s cancel-order --wallet main --order-id <ID> --confirm
 
 ================================================================================
 
 Examples:
-  # Check proxy wallet status (REQUIRED first step)
+  # Check strategies wallet status
   %(prog)s check --address UQBvW8...
+  %(prog)s check --wallet main
   
-  # Check eligibility for strategies
+  # Check eligibility
   %(prog)s eligible --address UQBvW8...
   
-  # Deploy proxy wallet (one-time, requires --confirm)
-  %(prog)s create-proxy --wallet main --confirm
+  # Get eligible tokens
+  %(prog)s from-tokens --type limit
+  %(prog)s to-tokens --type limit --from native
+  %(prog)s to-tokens --type dca --from TON
   
-  # List active orders
-  %(prog)s list --wallet main --status active
+  # Create strategies wallet (one-time)
+  %(prog)s create-wallet --wallet main --confirm
   
-  # Create a limit order (execute when price reaches target)
-  %(prog)s create-limit --wallet main --from TON --to USDT --amount 10 --price 5.5 --confirm
+  # Create limit order (buy USDT when price is good)
+  %(prog)s create-order --wallet main --type limit \\
+      --from TON --to USDT --amount 10 \\
+      --min-output 50000000000 --slippage 1 --confirm
   
-  # Create a DCA order (buy USDT with 100 TON over 10 orders, every 24 hours)
-  %(prog)s create-dca --wallet main --from TON --to USDT --amount 100 --orders 10 --interval 24 --confirm
+  # Create DCA order (buy USDT every hour)
+  %(prog)s create-order --wallet main --type dca \\
+      --from TON --to USDT --amount 100 \\
+      --delay 3600 --invocations 10 --confirm
   
-  # Cancel an order
-  %(prog)s cancel --wallet main --order-id abc123 --confirm
+  # List orders
+  %(prog)s list-orders --wallet main
+  %(prog)s list-orders --wallet main --status active
+  
+  # Get order details
+  %(prog)s get-order --wallet main --order-id abc123
+  
+  # Cancel order
+  %(prog)s cancel-order --wallet main --order-id abc123 --confirm
 
 Order Types:
-  - limit: Execute when target price is reached
-  - dca: Dollar Cost Averaging - split purchase over time intervals
-"""
+  limit - Execute when target price/output is reached
+  dca   - Dollar Cost Averaging (periodic purchases)
+
+Limit Order Settings:
+  --min-output   Minimum output amount in nano-units
+
+DCA Order Settings:
+  --delay        Delay between purchases in seconds (e.g., 3600 = 1 hour)
+  --invocations  Number of purchases to make
+""",
     )
-
-    parser.add_argument(
-        "--password", "-p", help="Wallet password (or WALLET_PASSWORD env)"
-    )
-
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
-
-    # --- check (alias for check-wallet) ---
-    check_p = subparsers.add_parser("check", help="Check if proxy wallet is deployed (required before orders)")
-    check_p.add_argument("--address", "-a", required=True, help="Wallet address")
     
-    # --- check-wallet (legacy, same as check) ---
-    check_wallet_p = subparsers.add_parser("check-wallet", help="Alias for 'check'")
-    check_wallet_p.add_argument("--address", "-a", required=True, help="Wallet address")
-
+    parser.add_argument("--password", "-p", help="Wallet password (or WALLET_PASSWORD env)")
+    
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+    
+    # --- check ---
+    check_p = subparsers.add_parser("check", help="Check if strategies wallet exists")
+    check_grp = check_p.add_mutually_exclusive_group(required=True)
+    check_grp.add_argument("--address", "-a", help="Wallet address")
+    check_grp.add_argument("--wallet", "-w", help="Wallet label")
+    
     # --- eligible ---
-    eligible_p = subparsers.add_parser("eligible", help="Check if wallet is eligible for strategies")
-    eligible_p.add_argument("--address", "-a", required=True, help="Wallet address")
-
-    # --- create-proxy ---
-    proxy_p = subparsers.add_parser("create-proxy", help="Deploy proxy wallet contract (one-time)")
-    proxy_p.add_argument("--wallet", "-w", required=True, help="Wallet label or address")
-    proxy_p.add_argument("--confirm", action="store_true", help="Confirm execution (required to deploy)")
-
-    # --- list ---
-    list_p = subparsers.add_parser("list", help="List strategy orders")
-    list_p.add_argument("--wallet", "-w", required=True, help="Wallet label or address")
-    list_p.add_argument("--type", "-t", choices=ORDER_TYPES, help="Filter by order type")
-    list_p.add_argument("--status", "-s", choices=STRATEGY_STATUS, help="Filter by status")
-
-    # --- get ---
-    get_p = subparsers.add_parser("get", help="Get order details")
-    get_p.add_argument("--wallet", "-w", required=True, help="Wallet address")
-    get_p.add_argument("--order-id", "-o", required=True, help="Order ID")
-
-    # --- create-limit ---
-    limit_p = subparsers.add_parser("create-limit", help="Create limit order")
-    limit_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
-    limit_p.add_argument("--from", "-f", dest="input_token", required=True, help="Input token")
-    limit_p.add_argument("--to", "-t", dest="output_token", required=True, help="Output token")
-    limit_p.add_argument("--amount", "-a", type=float, required=True, help="Input amount")
-    limit_p.add_argument("--price", type=float, required=True, help="Target price")
-    limit_p.add_argument("--confirm", action="store_true", help="Confirm execution")
-
-    # --- create-dca ---
-    dca_p = subparsers.add_parser("create-dca", help="Create DCA order")
-    dca_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
-    dca_p.add_argument("--from", "-f", dest="input_token", required=True, help="Input token")
-    dca_p.add_argument("--to", "-t", dest="output_token", required=True, help="Output token")
-    dca_p.add_argument("--amount", "-a", type=float, required=True, help="Total input amount")
-    dca_p.add_argument("--orders", "-n", type=int, required=True, help="Number of orders")
-    dca_p.add_argument("--interval", "-i", type=int, required=True, help="Interval in hours")
-    dca_p.add_argument("--confirm", action="store_true", help="Confirm execution")
-
-    # --- cancel ---
-    cancel_p = subparsers.add_parser("cancel", help="Cancel an order")
+    elig_p = subparsers.add_parser("eligible", help="Check if wallet is eligible")
+    elig_p.add_argument("--address", "-a", required=True, help="Wallet address")
+    
+    # --- from-tokens ---
+    ft_p = subparsers.add_parser("from-tokens", help="Get eligible from-tokens")
+    ft_p.add_argument("--type", "-t", choices=ORDER_TYPES, default="limit", help="Order type")
+    
+    # --- to-tokens ---
+    tt_p = subparsers.add_parser("to-tokens", help="Get eligible to-tokens")
+    tt_p.add_argument("--type", "-t", choices=ORDER_TYPES, default="limit", help="Order type")
+    tt_p.add_argument("--from", "-f", dest="from_token", default="native", help="From token")
+    
+    # --- create-wallet ---
+    cw_p = subparsers.add_parser("create-wallet", help="Create strategies wallet (one-time)")
+    cw_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
+    cw_p.add_argument("--confirm", action="store_true", help="Confirm execution")
+    
+    # --- list-orders ---
+    lo_p = subparsers.add_parser("list-orders", help="List strategy orders")
+    lo_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
+    lo_p.add_argument("--status", "-s", choices=ORDER_STATUSES, help="Filter by status")
+    
+    # --- get-order ---
+    go_p = subparsers.add_parser("get-order", help="Get order details")
+    go_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
+    go_p.add_argument("--order-id", "-o", required=True, help="Order ID")
+    
+    # --- create-order ---
+    co_p = subparsers.add_parser("create-order", help="Create strategy order")
+    co_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
+    co_p.add_argument("--type", "-t", choices=ORDER_TYPES, required=True, help="Order type")
+    co_p.add_argument("--from", "-f", dest="from_token", required=True, help="From token")
+    co_p.add_argument("--to", dest="to_token", required=True, help="To token")
+    co_p.add_argument("--amount", "-a", required=True, help="Input amount (TON/token units)")
+    co_p.add_argument("--slippage", type=float, default=1.0, help="Slippage %% (default: 1)")
+    co_p.add_argument("--suborders", type=int, default=1, help="Max suborders (default: 1)")
+    # Limit order settings
+    co_p.add_argument("--min-output", help="Minimum output amount (nano-units) for limit orders")
+    # DCA settings
+    co_p.add_argument("--delay", type=int, help="Delay between purchases in seconds (for DCA)")
+    co_p.add_argument("--invocations", type=int, help="Number of invocations (for DCA)")
+    co_p.add_argument("--price-from", type=float, help="Price range from (for DCA)")
+    co_p.add_argument("--price-to", type=float, help="Price range to (for DCA)")
+    co_p.add_argument("--confirm", action="store_true", help="Confirm execution")
+    
+    # --- cancel-order ---
+    cancel_p = subparsers.add_parser("cancel-order", help="Cancel strategy order")
     cancel_p.add_argument("--wallet", "-w", required=True, help="Wallet label")
     cancel_p.add_argument("--order-id", "-o", required=True, help="Order ID")
     cancel_p.add_argument("--confirm", action="store_true", help="Confirm execution")
-
+    
     args = parser.parse_args()
-
+    
     if not args.command:
         parser.print_help()
         return
-
+    
     try:
         password = args.password or os.environ.get("WALLET_PASSWORD")
-
-        if args.command in ("check", "check-wallet"):
-            result = check_strategy_wallet(args.address)
-
-        elif args.command == "eligible":
+        
+        # Commands that don't need wallet auth
+        if args.command == "eligible":
             result = check_eligibility(args.address)
-
-        elif args.command == "create-proxy":
-            # Resolve wallet address
-            wallet_addr = args.wallet
-            if not is_valid_address(wallet_addr):
+        
+        elif args.command == "from-tokens":
+            result = get_from_tokens(args.type)
+        
+        elif args.command == "to-tokens":
+            from_token = resolve_token(args.from_token)
+            result = get_to_tokens(args.type, from_token)
+        
+        # Commands that may need wallet auth
+        elif args.command == "check":
+            wallet_addr = args.address
+            xverify = None
+            
+            if args.wallet:
                 if not password:
                     if sys.stdin.isatty():
                         password = getpass.getpass("Wallet password: ")
                     else:
                         print(json.dumps({"error": "Password required"}))
                         sys.exit(1)
-                wallet_data = get_wallet_from_storage(wallet_addr, password)
+                
+                wallet_data, xverify = resolve_wallet_and_xverify(args.wallet, password)
                 if wallet_data:
                     wallet_addr = wallet_data["address"]
                 else:
                     print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
                     sys.exit(1)
-
-            # Build the proxy deployment transaction
-            tx_result = build_create_proxy_tx(wallet_addr)
             
-            if not tx_result["success"]:
-                result = tx_result
-            elif tx_result.get("transactions"):
-                # Execute the deployment transaction
-                if not password:
-                    if sys.stdin.isatty():
-                        password = getpass.getpass("Wallet password: ")
+            result = check_strategy_wallet(wallet_addr, xverify)
+        
+        # Commands that require wallet auth
+        elif args.command in ("create-wallet", "list-orders", "get-order", "create-order", "cancel-order"):
+            if not password:
+                if sys.stdin.isatty():
+                    password = getpass.getpass("Wallet password: ")
+                else:
+                    print(json.dumps({"error": "Password required"}))
+                    sys.exit(1)
+            
+            wallet_data, xverify = resolve_wallet_and_xverify(args.wallet, password)
+            if not wallet_data:
+                print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
+                sys.exit(1)
+            
+            if not xverify:
+                print(json.dumps({
+                    "error": "Failed to generate x-verify. Check wallet has mnemonic.",
+                    "note": "pynacl library required: pip install pynacl"
+                }))
+                sys.exit(1)
+            
+            if args.command == "create-wallet":
+                tx_result = create_strategy_wallet(wallet_data["address"], xverify)
+                if not tx_result["success"]:
+                    result = tx_result
+                elif tx_result.get("transaction", {}).get("address"):
+                    result = execute_strategy_tx(
+                        wallet_data,
+                        tx_result["transaction"],
+                        confirm=args.confirm,
+                    )
+                    result["operation"] = "create_strategies_wallet"
+                else:
+                    result = tx_result
+            
+            elif args.command == "list-orders":
+                result = list_orders(
+                    wallet_data["address"],
+                    xverify,
+                    status=args.status,
+                )
+            
+            elif args.command == "get-order":
+                result = get_order(args.order_id, wallet_data["address"], xverify)
+            
+            elif args.command == "create-order":
+                from_token = resolve_token(args.from_token)
+                to_token = resolve_token(args.to_token)
+                
+                # Convert amount to nano-units
+                try:
+                    amount_float = float(args.amount)
+                    # Assume TON or standard jetton (9 decimals)
+                    input_amount = str(int(amount_float * 1e9))
+                except ValueError:
+                    input_amount = args.amount
+                
+                # Build settings
+                settings = {}
+                if args.type == "limit":
+                    if args.min_output:
+                        settings["min_output_amount"] = str(args.min_output)
                     else:
-                        print(json.dumps({"error": "Password required for signing"}))
+                        print(json.dumps({"error": "--min-output required for limit orders"}))
                         sys.exit(1)
+                elif args.type == "dca":
+                    settings["delay"] = args.delay or 3600
+                    settings["price_range_from"] = args.price_from or 0.0
+                    settings["price_range_to"] = args.price_to or 0.0
                 
-                result = execute_strategy_tx(
-                    wallet_label=args.wallet,
-                    transactions=tx_result["transactions"],
-                    password=password,
-                    confirm=args.confirm
-                )
-                result["operation"] = "deploy_proxy_wallet"
-                result["proxy_address"] = tx_result.get("proxy_address")
+                max_invocations = args.invocations or 1
                 
-                if args.confirm and result.get("success"):
-                    result["message"] = "✅ Proxy wallet deployed! You can now create DCA/limit orders."
-                    result["next_step"] = "Run: strategies.py create-limit/create-dca ..."
-            elif tx_result.get("proxy_address"):
-                # Proxy already exists
-                result = {
-                    "success": True,
-                    "message": "Proxy wallet already exists",
-                    "proxy_address": tx_result.get("proxy_address"),
-                    "next_step": "Run: strategies.py create-limit/create-dca ..."
-                }
-            else:
-                result = tx_result
-
-        elif args.command == "list":
-            # Resolve wallet address
-            wallet_addr = args.wallet
-            if not is_valid_address(wallet_addr):
-                if password:
-                    wallet_data = get_wallet_from_storage(wallet_addr, password)
-                    if wallet_data:
-                        wallet_addr = wallet_data["address"]
-
-            result = list_orders(
-                wallet_address=wallet_addr,
-                order_type=args.type,
-                status=args.status
-            )
-
-        elif args.command == "get":
-            result = get_order(args.order_id, args.wallet)
-
-        elif args.command == "create-limit":
-            if not password:
-                if sys.stdin.isatty():
-                    password = getpass.getpass("Wallet password: ")
-                else:
-                    print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
-
-            wallet_data = get_wallet_from_storage(args.wallet, password)
-            if not wallet_data:
-                print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
-                sys.exit(1)
-
-            tx_result = build_create_order_tx(
-                wallet_address=wallet_data["address"],
-                order_type="limit",
-                input_token=args.input_token,
-                output_token=args.output_token,
-                input_amount=args.amount,
-                target_price=args.price
-            )
-
-            if not tx_result["success"]:
-                result = tx_result
-            elif tx_result.get("transactions"):
-                result = execute_strategy_tx(
-                    wallet_label=args.wallet,
-                    transactions=tx_result["transactions"],
-                    password=password,
-                    confirm=args.confirm
+                tx_result = create_order(
+                    wallet_data["address"],
+                    xverify,
+                    args.type,
+                    from_token,
+                    to_token,
+                    input_amount,
+                    max_suborders=args.suborders,
+                    max_invocations=max_invocations,
+                    slippage=args.slippage,
+                    settings=settings,
                 )
-                result["order_preview"] = tx_result.get("order_preview")
-            else:
-                result = tx_result
-
-        elif args.command == "create-dca":
-            if not password:
-                if sys.stdin.isatty():
-                    password = getpass.getpass("Wallet password: ")
+                
+                if not tx_result["success"]:
+                    result = tx_result
+                elif tx_result.get("transaction", {}).get("address"):
+                    result = execute_strategy_tx(
+                        wallet_data,
+                        tx_result["transaction"],
+                        confirm=args.confirm,
+                    )
+                    result["operation"] = f"create_{args.type}_order"
+                    result["order_preview"] = tx_result.get("order_preview")
                 else:
-                    print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
-
-            wallet_data = get_wallet_from_storage(args.wallet, password)
-            if not wallet_data:
-                print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
-                sys.exit(1)
-
-            tx_result = build_create_order_tx(
-                wallet_address=wallet_data["address"],
-                order_type="dca",
-                input_token=args.input_token,
-                output_token=args.output_token,
-                input_amount=args.amount,
-                interval_hours=args.interval,
-                total_orders=args.orders
-            )
-
-            if not tx_result["success"]:
-                result = tx_result
-            elif tx_result.get("transactions"):
-                result = execute_strategy_tx(
-                    wallet_label=args.wallet,
-                    transactions=tx_result["transactions"],
-                    password=password,
-                    confirm=args.confirm
-                )
-                result["order_preview"] = tx_result.get("order_preview")
-            else:
-                result = tx_result
-
-        elif args.command == "cancel":
-            if not password:
-                if sys.stdin.isatty():
-                    password = getpass.getpass("Wallet password: ")
+                    result = tx_result
+            
+            elif args.command == "cancel-order":
+                tx_result = cancel_order(args.order_id, wallet_data["address"], xverify)
+                if not tx_result["success"]:
+                    result = tx_result
+                elif tx_result.get("transaction", {}).get("address"):
+                    result = execute_strategy_tx(
+                        wallet_data,
+                        tx_result["transaction"],
+                        confirm=args.confirm,
+                    )
+                    result["operation"] = "cancel_order"
+                    result["order_id"] = args.order_id
                 else:
-                    print(json.dumps({"error": "Password required"}))
-                    sys.exit(1)
-
-            wallet_data = get_wallet_from_storage(args.wallet, password)
-            if not wallet_data:
-                print(json.dumps({"error": f"Wallet not found: {args.wallet}"}))
-                sys.exit(1)
-
-            tx_result = build_cancel_order_tx(args.order_id, wallet_data["address"])
-
-            if not tx_result["success"]:
-                result = tx_result
-            elif tx_result.get("transactions"):
-                result = execute_strategy_tx(
-                    wallet_label=args.wallet,
-                    transactions=tx_result["transactions"],
-                    password=password,
-                    confirm=args.confirm
-                )
-                result["cancelled_order_id"] = args.order_id
-            else:
-                result = tx_result
-
+                    result = tx_result
+        
         else:
             result = {"error": f"Unknown command: {args.command}"}
-
+        
         print(json.dumps(result, indent=2, ensure_ascii=False))
-
+        
         if not result.get("success", False):
             sys.exit(1)
-
+    
+    except KeyboardInterrupt:
+        print(json.dumps({"error": "Interrupted"}))
+        sys.exit(1)
     except Exception as e:
         print(json.dumps({"error": str(e)}, indent=2))
         sys.exit(1)
