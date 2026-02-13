@@ -997,6 +997,129 @@ Use token symbols or full jetton master addresses.
                 ],
             }
 
+        elif args.command == "smart":
+            # Smart routing - get optimized route with custom splits/length
+            password = args.password or os.environ.get("WALLET_PASSWORD")
+            wallet_addr = args.wallet
+            if not is_valid_address(wallet_addr):
+                if password:
+                    wallet_data = get_wallet_from_storage(wallet_addr, password)
+                    if wallet_data:
+                        wallet_addr = wallet_data["address"]
+            
+            # Resolve tokens
+            input_token = args.input_token.upper()
+            output_token = args.output_token.upper()
+            
+            input_addr = KNOWN_TOKENS.get(input_token, input_token)
+            output_addr = KNOWN_TOKENS.get(output_token, output_token)
+            
+            # Get token info for decimals
+            input_info = resolve_token_by_symbol(input_token) if input_addr == "native" or input_token in KNOWN_TOKENS else {"decimals": 9}
+            output_info = resolve_token_by_symbol(output_token) if output_addr == "native" or output_token in KNOWN_TOKENS else {"decimals": 9}
+            
+            if input_addr == "native":
+                input_info = {"decimals": 9, "symbol": "TON"}
+            if output_addr == "native":
+                output_info = {"decimals": 9, "symbol": "TON"}
+            
+            # Build request with custom routing params
+            request_body = {
+                "input_token": {"blockchain": "ton", "address": input_addr},
+                "output_token": {"blockchain": "ton", "address": output_addr},
+                "input_amount": args.amount,
+                "max_splits": args.max_splits,
+                "max_length": args.max_length,
+            }
+            
+            route_result = swap_coffee_request("/route", method="POST", json_data=request_body, version="v1")
+            
+            if not route_result["success"]:
+                result = {"success": False, "error": route_result.get("error", "Failed to get smart route")}
+            else:
+                data = route_result["data"]
+                output_amount = float(data.get("output_amount", 0))
+                min_output = output_amount * (1 - args.slippage / 100)
+                
+                paths = data.get("paths", [])
+                route_info = []
+                for path in paths:
+                    route_info.append({
+                        "dex": path.get("dex", "unknown"),
+                        "pool": path.get("pool_address"),
+                        "input_amount": path.get("swap", {}).get("input_amount"),
+                        "output_amount": path.get("swap", {}).get("output_amount"),
+                    })
+                
+                result = {
+                    "success": True,
+                    "action": "smart_route",
+                    "input": {
+                        "symbol": input_token,
+                        "amount": args.amount,
+                        "usd": data.get("input_usd", 0),
+                    },
+                    "output": {
+                        "symbol": output_token,
+                        "amount": output_amount,
+                        "min_amount": min_output,
+                        "usd": data.get("output_usd", 0),
+                    },
+                    "price_impact": data.get("price_impact", 0),
+                    "recommended_gas": data.get("recommended_gas", 0.15),
+                    "routing": {
+                        "max_splits": args.max_splits,
+                        "max_length": args.max_length,
+                        "actual_splits": len(paths),
+                    },
+                    "paths": route_info,
+                }
+
+        elif args.command == "multi":
+            # Multi-swap - multiple swaps in one go (just build transactions)
+            try:
+                swaps = json.loads(args.swaps)
+            except json.JSONDecodeError as e:
+                result = {"success": False, "error": f"Invalid JSON in --swaps: {e}"}
+            else:
+                password = args.password or os.environ.get("WALLET_PASSWORD")
+                wallet_addr = args.wallet
+                if not is_valid_address(wallet_addr):
+                    if password:
+                        wallet_data = get_wallet_from_storage(wallet_addr, password)
+                        if wallet_data:
+                            wallet_addr = wallet_data["address"]
+                
+                multi_results = []
+                for i, swap_def in enumerate(swaps):
+                    input_token = swap_def.get("input_token", "").upper()
+                    output_token = swap_def.get("output_token", "").upper()
+                    input_amount = float(swap_def.get("input_amount", 0))
+                    
+                    quote = get_swap_quote(
+                        input_token=input_token,
+                        output_token=output_token,
+                        input_amount=input_amount,
+                        sender_address=wallet_addr,
+                        slippage=args.slippage,
+                    )
+                    
+                    multi_results.append({
+                        "index": i,
+                        "input": input_token,
+                        "output": output_token,
+                        "amount": input_amount,
+                        "quote": quote if quote.get("success") else {"error": quote.get("error")},
+                    })
+                
+                result = {
+                    "success": True,
+                    "action": "multi_swap_quote",
+                    "wallet": wallet_addr,
+                    "swaps": multi_results,
+                    "note": "Use execute command for each swap to perform them",
+                }
+
         else:
             result = {"error": f"Unknown command: {args.command}"}
 
