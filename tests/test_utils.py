@@ -677,11 +677,11 @@ class TestHttpClient:
 
 
 class TestTonApiRequest:
-    """Tests for TON Center API request wrapper."""
+    """Tests for TonAPI-specific request wrapper."""
 
     @pytest.fixture(autouse=True)
     def setup_mock_config(self, tmp_path, monkeypatch):
-        """Mock config for TON Center API tests."""
+        """Mock config for TonAPI tests."""
         temp_skill_dir = tmp_path / "ton-skill"
         temp_config_file = temp_skill_dir / "config.json"
 
@@ -694,40 +694,37 @@ class TestTonApiRequest:
 
     @patch("utils.api_request")
     def test_tonapi_request_uses_config_key(self, mock_api_request):
-        """TON Center API request uses API key from config."""
+        """TonAPI request uses API key from config."""
         mock_api_request.return_value = {"success": True, "data": {}}
 
         tonapi_request("/accounts/test")
 
         call_kwargs = mock_api_request.call_args[1]
-        # TON Center API uses api_key in params, not as separate parameter
-        assert call_kwargs["params"]["api_key"] == "test_api_key"
+        assert call_kwargs["api_key"] == "test_api_key"
 
     @patch("utils.api_request")
     def test_tonapi_request_builds_url(self, mock_api_request):
-        """TON Center API request builds correct URL."""
+        """TonAPI request builds correct URL."""
         mock_api_request.return_value = {"success": True, "data": {}}
 
         tonapi_request("/accounts/EQtest123")
 
         call_kwargs = mock_api_request.call_args[1]
         # URL is passed as keyword argument 'url'
-        assert "toncenter.com/api/v2/accounts/EQtest123" in call_kwargs.get("url", "") or (
+        assert "tonapi.io/v2/accounts/EQtest123" in call_kwargs.get("url", "") or (
             mock_api_request.call_args[0]
-            and "toncenter.com" in mock_api_request.call_args[0][0]
+            and "tonapi.io" in mock_api_request.call_args[0][0]
         )
 
     @patch("utils.api_request")
     def test_tonapi_request_passes_params(self, mock_api_request):
-        """TON Center API request passes query params and adds api_key."""
+        """TonAPI request passes query params."""
         mock_api_request.return_value = {"success": True, "data": {}}
 
         tonapi_request("/events", params={"limit": 10})
 
         call_kwargs = mock_api_request.call_args[1]
-        # TON Center API adds api_key to params automatically
-        assert call_kwargs["params"]["limit"] == 10
-        assert call_kwargs["params"]["api_key"] == "test_api_key"
+        assert call_kwargs["params"] == {"limit": 10}
 
 
 # =============================================================================

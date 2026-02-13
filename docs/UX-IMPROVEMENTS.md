@@ -330,8 +330,8 @@ Let's get you set up:
 
 Step 1 of 4: API Keys
 ━━━━━━━━━━━━━━━━━━━━
-TON Center API key enables blockchain queries.
-Get yours free at: https://toncenter.com/api/v2/
+TonAPI key enables blockchain queries.
+Get yours free at: https://tonscan.org/api
 
 Enter TonAPI key (or press Enter to skip): _____
 

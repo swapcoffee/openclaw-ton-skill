@@ -54,8 +54,8 @@ SKILL_DIR = Path.home() / ".openclaw" / "ton-skill"
 CONFIG_FILE = SKILL_DIR / "config.json"
 WALLETS_FILE = SKILL_DIR / "wallets.enc"
 
-# TON Center API
-TONAPI_BASE = "https://toncenter.com/api/v2"
+# TonAPI
+TONAPI_BASE = "https://tonapi.io/v2"
 
 
 # =============================================================================
@@ -607,7 +607,7 @@ def tokens_api_request(
 
 
 # =============================================================================
-# TON Center API helpers
+# TonAPI helpers
 # =============================================================================
 
 
@@ -618,12 +618,12 @@ def tonapi_request(
     json_data: Optional[dict] = None,
 ) -> dict:
     """
-    Запрос к TON Center API с использованием ключа из конфига.
+    Запрос к TonAPI с использованием ключа из конфига.
 
     Args:
-        endpoint: Endpoint (без base URL), например "/getAddressBalance"
+        endpoint: Endpoint (без base URL), например "/accounts/{account}"
         method: HTTP метод
-        params: Query параметры (api_key будет добавлен автоматически)
+        params: Query параметры
         json_data: JSON body
 
     Returns:
@@ -634,21 +634,14 @@ def tonapi_request(
 
     url = f"{TONAPI_BASE}{endpoint}"
 
-    # TON Center API использует api_key query параметр или X-API-Key header
-    # Используем query параметр для совместимости
-    if params is None:
-        params = {}
-    if api_key:
-        params["api_key"] = api_key
-
     return api_request(
         url=url,
         method=method,
         params=params,
         json_data=json_data,
-        api_key=None,  # Уже добавлен в params
-        api_key_header="X-API-Key",
-        api_key_prefix="",
+        api_key=api_key if api_key else None,
+        api_key_header="Authorization",
+        api_key_prefix="Bearer ",
     )
 
 

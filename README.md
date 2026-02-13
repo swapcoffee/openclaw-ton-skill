@@ -31,7 +31,7 @@ The **OpenClaw TON Blockchain Skill** is a comprehensive integration for [OpenCl
 | API | Purpose |
 |-----|---------|
 | **[swap.coffee](https://swap.coffee)** | DEX aggregation, swaps, yield pools, token data |
-| **[TON Center](https://toncenter.com/api/v2/)** | Blockchain queries, transaction emulation, account data |
+| **[TonAPI](https://tonapi.io)** | Blockchain queries, transaction emulation, account data |
 | **[DYOR.io](https://dyor.io)** | Token analytics, trust scores, scam detection |
 | **[Marketapp](https://marketapp.ws)** | NFT trading, floor prices, buy/sell orders |
 
@@ -162,8 +162,8 @@ Configure API keys via CLI or edit `~/.openclaw/ton-skill/config.json`:
 ```bash
 cd ~/.openclaw/skills/ton-blockchain/scripts
 
-# TON Center (required for most operations)
-python utils.py config set tonapi_key "YOUR_TONCENTER_API_KEY"
+# TonAPI (required for most operations)
+python utils.py config set tonapi_key "YOUR_TONAPI_KEY"
 
 # swap.coffee (for swaps and yield) — optional, works without key
 python utils.py config set swap_coffee_key "YOUR_SWAP_COFFEE_KEY"
@@ -179,7 +179,7 @@ python utils.py config set marketapp_key "YOUR_MARKETAPP_KEY"
 
 | Service | URL | Notes |
 |---------|-----|-------|
-| TON Center | https://toncenter.com/api/v2/ | Free tier available |
+| TonAPI | https://tonscan.org/api | Free tier available |
 | DYOR | https://dyor.io/tonapi?pricing | Token analytics |
 | Marketapp | https://marketapp.ws/api-token | NFT trading |
 

@@ -60,7 +60,7 @@ This ensures real-time transaction alerts are always active for ALL wallets.
 
 On first use, prompt the user to configure API keys. At minimum:
 1. **Marketapp** (required for NFT floor prices, buy/sell): Get token at https://marketapp.ws/api-token
-2. **TON Center** (optional, free tier works): Get at https://toncenter.com/api/v2/
+2. **TonAPI** (optional, free tier works): Get at https://tonscan.org/api
 3. **DYOR** (optional, for token analytics): Get at https://dyor.io/tonapi?pricing
 
 ### API Keys
@@ -68,8 +68,8 @@ On first use, prompt the user to configure API keys. At minimum:
 Configure via CLI or edit `~/.openclaw/ton-skill/config.json`:
 
 ```bash
-# TON Center (required for most operations)
-python utils.py config set tonapi_key "YOUR_TONCENTER_API_KEY"
+# TonAPI (required for most operations)
+python utils.py config set tonapi_key "YOUR_TONAPI_KEY"
 
 # swap.coffee (for swaps and yield)
 python utils.py config set swap_coffee_key "YOUR_SWAP_COFFEE_KEY"

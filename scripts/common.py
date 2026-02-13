@@ -81,8 +81,8 @@ DEX_ROUTERS = {
 # API URLs
 # =============================================================================
 
-# TON Center API
-TONAPI_BASE_URL = "https://toncenter.com/api/v2"
+# TonAPI
+TONAPI_BASE_URL = "https://tonapi.io/v2"
 
 # swap.coffee
 SWAP_COFFEE_BASE_URL = "https://backend.swap.coffee"
@@ -253,7 +253,7 @@ def get_token_symbol(address: str) -> Optional[str]:
 COMMON_EPILOG = """
 Environment variables:
   WALLET_PASSWORD    Password for encrypted wallet storage
-  TONAPI_KEY         TON Center API key (optional, increases rate limits)
+  TONAPI_KEY         TonAPI API key (optional, increases rate limits)
   SWAP_COFFEE_KEY    swap.coffee API key (optional)
   DYOR_API_KEY       DYOR.io API key (optional, enables advanced analytics)
 
