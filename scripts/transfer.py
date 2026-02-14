@@ -793,7 +793,7 @@ Examples:
     # Safety: forbid contradictory flags
     if getattr(args, "dry_run", False) and getattr(args, "confirm", False):
         print(json.dumps({"error": "Use either --confirm or --dry-run, not both."}))
-        return sys.exit(1)
+        sys.exit(1)
 
     # If --dry-run is set, force emulation
     if getattr(args, "dry_run", False):
